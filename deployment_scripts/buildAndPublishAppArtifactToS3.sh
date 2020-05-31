@@ -139,6 +139,10 @@ echo "Uploading zip file to s3"
 echo "aws s3 cp $PROJECT_NAME/$dist_folder_name/$FILE_NAME s3://$S3_ARTIFACT_BUCKET/$ARTIFACT_S3_KEY --acl bucket-owner-full-control"
 aws s3 cp $PROJECT_NAME/$dist_folder_name/$FILE_NAME s3://$S3_ARTIFACT_BUCKET/$ARTIFACT_S3_KEY --acl bucket-owner-full-control
 
+# Clean up files under $PROJECT_NAME/$dist_folder_name/ folder
+echo "Deleted "`pwd`"/$PROJECT_NAME/$dist_folder_name/ folder"
+rm -rf $PROJECT_NAME/$dist_folder_name
+
 # Delete git tag
 #tag_to_delete=eb-docker-nginx-proxy-development-0.0.1
 #echo "Deleting git tag $tag_to_delete"
