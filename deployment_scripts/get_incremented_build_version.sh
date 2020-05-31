@@ -85,8 +85,10 @@ echo "Tag name to increment is $tag_to_increment. Increment level is $INCREMENT_
 
 # Increment tag version number based on the level selected
 version_number=$(echo $tag_to_increment | sed 's/^.*[^0-9]\([0-9]*\.[0-9]*\.[0-9]*\).*$/\1/')
-export NEW_VERSION=$(semver $version_number -i $INCREMENT_LEVEL)
+NEW_VERSION=$(semver $version_number -i $INCREMENT_LEVEL)
 echo "New version number is $NEW_VERSION"
+echo ${NEW_VERSION} > incrementedVersion.txt
 
-export NEW_TAG_NAME="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${NEW_VERSION}"
+NEW_TAG_NAME="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${NEW_VERSION}"
 echo "New git tag name is $NEW_TAG_NAME"
+echo ${NEW_TAG_NAME} > incrementedTagName.txt
