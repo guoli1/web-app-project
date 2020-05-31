@@ -67,12 +67,12 @@ if ! [[ "$ENVIRONMENT_NAME" =~ ^(development|uat|production)$ ]]; then
   exit 1
 fi
 
-if [ -z $FILE_NAME ]; then
+if [ -z "$FILE_NAME" ]; then
   echo "Elasticbeanstalk application version zip file name is a required argument."
   usage
   exit 1
 fi
-if [ -z $PROJECT_NAME ]; then
+if [ -z "$PROJECT_NAME" ]; then
   echo "Project folder name is a required argument."
   usage
   exit 1
@@ -114,7 +114,7 @@ echo "Tag name to increment is $tag_to_increment. Increment level is $INCREMENT_
 
 # Increment tag version number based on the level selected
 version_number=$(echo $tag_to_increment | sed 's/^.*[^0-9]\([0-9]*\.[0-9]*\.[0-9]*\).*$/\1/')
-new_version=$(./node_modules/.bin/semver $version_number -i $increment_level)
+new_version=$(./node_modules/.bin/semver $version_number -i $INCREMENT_LEVEL)
 echo "New version number is $new_version"
 
 new_tag_name="${PROJECT_NAME}-${ENVIRONMENT_NAME}-${new_version}"

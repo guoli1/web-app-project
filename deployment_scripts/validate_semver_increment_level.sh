@@ -41,7 +41,7 @@ while getopts "hi:" opt; do
     esac
 done
 
-if [ -z $INCREMENT_LEVEL ]; then
+if [ -z "$INCREMENT_LEVEL" ]; then
   echo "Semantic version increment level is a required argument."
   usage
   exit 1

@@ -41,7 +41,7 @@ while getopts "he:" opt; do
     esac
 done
 
-if [ -z $ENVIRONMENT_NAME ]; then
+if [ -z "$ENVIRONMENT_NAME" ]; then
   echo "Environment name is a required argument."
   usage
   exit 1
