@@ -1,9 +1,4 @@
 #!/bin/bash
-#cd scripts
-#cat text_file.txt | while read -r line ; do
-#    printf "$line\n"
-#done
-#-------------------------------------------
 # script will exit with a non-zero code if any command fails
 set -e
 
@@ -12,7 +7,7 @@ set -e
 set +x
 
 # example command to run script:
-#sh deployment_scripts/buildAndPublishAppArtifactToS3.sh -f eb-docker-nginx-proxy.zip -p eb-docker-nginx-proxy
+#sh deployment_scripts/localBuildAndPublishAppArtifactToS3.sh -f eb-docker-nginx-proxy.zip -p eb-docker-nginx-proxy
 
 usage(){
     echo "Usage: "

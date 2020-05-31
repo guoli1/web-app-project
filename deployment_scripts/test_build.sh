@@ -1,9 +1,4 @@
 #!/bin/bash
-#cd scripts
-#cat text_file.txt | while read -r line ; do
-#    printf "$line\n"
-#done
-#-------------------------------------------
 # script will exit with a non-zero code if any command fails
 set -e
 
@@ -17,36 +12,25 @@ set +x
 usage(){
     echo "Usage: "
     echo "Build the elasticbeanstalk application version zip artifact. Usage:
-$(basename "$0") [-h] [-e -f -p -i]
+$(basename "$0") [-h] [-f -p]
 Where:
     -h: Show this usage message.
-    -e: Environment name. Must be one of development, uat or production. (default: development)
     -f: Elasticbeanstalk application version zip artifact file name. (eg. eb-docker-nginx-proxy.zip)
     -p: Project folder name. (e.g. eb-docker-nginx-proxy)
-    -i: Increment level for semantic versioning on the latest version number. Must be one of major, minor, or patch. (default: patch)
 "
 }
 
-ENVIRONMENT_NAME=development
-INCREMENT_LEVEL=patch
-
-while getopts "he:f:p:i:" opt; do
+while getopts "hf:p:" opt; do
     case ${opt} in
         h )
             usage
             exit 0
-          ;;
-        e )
-            ENVIRONMENT_NAME=$OPTARG
           ;;
         f )
             FILE_NAME=$OPTARG
           ;;
         p )
             PROJECT_NAME=$OPTARG
-          ;;
-        i )
-            INCREMENT_LEVEL=$OPTARG
           ;;
         \? )
             echo "Invalid Option: -$OPTARG" 1>&2
@@ -61,12 +45,6 @@ while getopts "he:f:p:i:" opt; do
     esac
 done
 
-if ! [[ "$ENVIRONMENT_NAME" =~ ^(development|uat|production)$ ]]; then
-  echo "Environment name must be one of development, uat or production."
-  usage
-  exit 1
-fi
-
 if [ -z $FILE_NAME ]; then
   echo "Elasticbeanstalk application version zip file name is a required argument."
   usage
@@ -74,12 +52,6 @@ if [ -z $FILE_NAME ]; then
 fi
 if [ -z $PROJECT_NAME ]; then
   echo "Project folder name is a required argument."
-  usage
-  exit 1
-fi
-
-if ! [[ "$INCREMENT_LEVEL" =~ ^(major|minor|patch)$ ]]; then
-  echo "Semantic version increment level must be one of major, minor or patch."
   usage
   exit 1
 fi
