@@ -1,0 +1,24 @@
+{
+  "Parameters" : {
+    "ASGMaxSize" : 6,
+    "ASGMinSize" : 2,
+    "AlarmsEnabled" : "true",
+    "BastionHostCIDRBlock" : "10.192.10.222/32",
+    "ConnectionDrainingEnabled" : "true",
+    "CrossZoneLoadBalancingEnabled" : "true",
+    "DeleteSourceFromS3Enabled" : "true",
+    "EBSApplicationVersionSourceBucket" : "development-datalake-artifact",
+    "EBSApplicationVersionSourceKey" : "development/eb-docker-nginx-proxy/0.0.2/eb-docker-nginx-proxy.zip",
+    "EC2InstanceType" : "t2.micro",
+    "EC2KeyPairName" : "development-datalake-ca-central-kp",
+    "ELBSubnetIds" : "subnet-0cd3ee98b25c6ec7c,subnet-0f6fcfcfc3460d638",
+    "ELBVisibility" : "public",
+    "Environment" : "dev",
+    "HTTPLocation" : "45.41.170.124/32",
+    "LbHealthCheckPath" : "/",
+    "LogRetentionInDays" : 1,
+    "MaxAgeInDays" : 30,
+    "VpcId" : "vpc-04c09dba8401a4ca6",
+    "VpcInstanceSubnetIds" : "subnet-056cef2cfc9c94f40,subnet-0ab6c3cc8c5dc8a78"
+  }
+}

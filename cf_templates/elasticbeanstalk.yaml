@@ -1,0 +1,670 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Creates the frontend and backend docker containers for datahub buddy web application.
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: ['test', 'dev', 'cert', 'prod']
+    Description: The Environment tag. This should be consistent with the stack name prefix.
+    ConstraintDescription: Must be one of test, dev, cert or prod.
+  DeleteSourceFromS3Enabled:
+    Type: String
+    AllowedValues: [true, false]
+    Description: Enable or disable deletion of a version's source bundle from Amazon S3 when Elastic Beanstalk deletes the application version.
+    Default: true
+  MaxAgeInDays:
+    Type: Number
+    Description: The number of days to retain an application versions.
+    Default: 30
+  EBSApplicationVersionSourceBucket:
+    Type: String
+    Description: S3 bucket where the EBS application version file is stored.
+    Default: elasticbeanstalk-us-west-1-368057246517
+  EBSApplicationVersionSourceKey:
+    Type: String
+    Description: S3 key where the EBS application version file is stored.
+    Default: 2020150A8y-eb-docker-nginx-proxy.zip
+  EC2KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of the EC2 key pair used to ssh into the web app instance.
+  EC2InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues: ["t2.micro", "t2.small", "t2.medium", "t2.large"]
+    Description: The web app EC2 instance type
+    ConstraintDescription: Must be a valid instance type
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy web app EC2 instances
+  VpcInstanceSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet to distribute EC2 instances. Should belong to selected VPC.
+  ELBSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for the elastic load balancer. Should belong to selected VPC.
+  ELBVisibility:
+    Type: String
+    Description: Accessibility of the ELB to requests from connected VPC or the internet.
+    Default: public
+  CrossZoneLoadBalancingEnabled:
+    Type: String
+    AllowedValues: [true, false]
+    Description: Configure the load balancer to route traffic evenly across all instances in all Availability Zones.
+    Default: true  
+  ConnectionDrainingEnabled:
+    Type: String
+    AllowedValues: [true, false]
+    Description: Specifies whether the load balancer maintains existing connections to instances that have become unhealthy or deregistered to complete in-progress requests.
+    Default: true  
+  # CertificateArn:
+  #   Type: String
+  #   Description: SSL Certificate Arn.
+  #   ConstraintDescription: Must match the CertificateArn the domain *.datahub.loyalty.com is for.
+  LogRetentionInDays:
+    Type: Number
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
+    Description: The number of days to retain the CloudWatch logs
+    Default: 1
+    ConstraintDescription: Possible values are 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, and 3653
+  LbHealthCheckPath:
+    Type: String
+    Description: URL for load balancer health check.
+    Default: /
+    ConstraintDescription: Must be a valid Request path for the backend application.
+  AlarmsEnabled:
+    Type: String
+    AllowedValues: [true, false]
+    Description: Enable or disable CloudWatch alarms.
+    Default: true
+  ASGMinSize:
+      Type: Number
+      Description: Min number of instances to scale in to
+      Default: 1
+  ASGMaxSize:
+      Type: Number
+      Description: Max number of instances to scale out to
+      Default: 6
+  HTTPLocation:
+    Description: The IP address range that can be used to estalish an HTTP session to the Application Load Balancer
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  BastionHostCIDRBlock:
+    Description: The private IP address of the bastion host EC2 instances.
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.  
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups:
+      - Label: 
+          default: "Elastic Beanstalk App Version"
+        Parameters:
+          - DeleteSourceFromS3Enabled
+          - MaxAgeInDays
+          - EBSApplicationVersionSourceBucket
+          - EBSApplicationVersionSourceKey
+      - Label: 
+          default: "Elastic Beanstalk Instance"
+        Parameters:
+          - EC2KeyPairName
+          - EC2InstanceType
+          - VpcId
+          - VpcInstanceSubnetIds
+          - ASGMinSize
+          - ASGMaxSize
+          - BastionHostCIDRBlock
+      - Label:
+          default: "Elastic Beanstalk Load Balancer"
+        Parameters:
+          - ELBSubnetIds
+          - ELBVisibility
+          - CrossZoneLoadBalancingEnabled
+          - ConnectionDrainingEnabled
+          # - CertificateArn
+          - LbHealthCheckPath
+          - HTTPLocation
+      - Label:
+          default: "Log Retention"
+        Parameters:
+          - LogRetentionInDays
+      - Label: 
+          default: "Alarms"
+        Parameters: 
+          - AlarmsEnabled
+
+Conditions:
+  AlarmsEnabled: !Equals [!Ref AlarmsEnabled, true]
+
+Resources:
+  # Security Group
+  ALBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for application load balancer
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: !Ref HTTPLocation
+      VpcId: !Ref VpcId
+
+  # SNS Topic
+  DatalakeNotificationTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-notifications'
+      DisplayName: !Sub 'Notifications for ${AWS::StackName}'
+
+  # IAM Roles, Instance Profiles and Policies
+  DatahubBuddyEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly            
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker     
+  
+  DatahubBuddyInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles: [!Ref DatahubBuddyEC2Role] 
+  
+  DatahubBuddyEC2RoleElasticbeanstalkS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref DatahubBuddyEC2Role]
+      PolicyName: !Sub "${AWS::StackName}-elasticbeanstalk-s3-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:Get*
+              - s3:List*
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource:
+              - arn:aws:s3:::elasticbeanstalk-*
+              - arn:aws:s3:::elasticbeanstalk-*/*
+          - Effect: Allow
+            Action:
+              - s3:Get*
+              - s3:List*
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource:
+              - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}'
+              - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}/*'
+
+  DatahubBuddyEC2RoleCloudWatchPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref DatahubBuddyEC2Role]
+      PolicyName: !Sub "${AWS::StackName}-cloudwatch-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogStreams
+              - logs:PutRetentionPolicy
+            Resource:
+              - "arn:aws:logs:*:*:*"
+
+  DatahubBuddyEC2RoleCloudwatchMetircs:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref DatahubBuddyEC2Role]
+      PolicyName: !Sub "${AWS::StackName}-cloudwatch-metrics-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - "cloudwatch:GetMetricData"
+              - "cloudwatch:PutMetricData"            
+              - "cloudwatch:ListMetrics"
+            Resource:
+              - "*"
+
+  # -----------------------------
+  DatahubBuddyEbstalkServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: elasticbeanstalk.amazonaws.com
+            Action: sts:AssumeRole
+
+  DatahubBuddyEbstalkServiceRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref DatahubBuddyEbstalkServiceRole]
+      PolicyName: !Sub "${AWS::StackName}-ebs-service-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+            - cloudformation:DescribeStackResource
+            - cloudformation:DescribeStackResources
+            - cloudformation:DescribeStacks
+          Resource:
+            - arn:aws:cloudformation:*:*:stack/awseb-*
+            - arn:aws:cloudformation:*:*:stack/eb-*
+        - Effect: Allow
+          Action:
+            - autoscaling:DescribeAutoScalingGroups
+            - autoscaling:DescribeAutoScalingInstances
+            - autoscaling:DescribeNotificationConfigurations
+            - autoscaling:DescribeScalingActivities
+            - autoscaling:PutNotificationConfiguration
+            - ec2:DescribeInstanceStatus
+            - ec2:AssociateAddress
+            - ec2:DescribeAddresses
+            - ec2:DescribeInstances
+            - ec2:DescribeSecurityGroups
+            - elasticloadbalancing:DescribeInstanceHealth
+            - elasticloadbalancing:DescribeLoadBalancers
+            - elasticloadbalancing:DescribeTargetHealth
+            - elasticloadbalancing:DescribeTargetGroups
+            - lambda:GetFunction
+            - sqs:GetQueueAttributes
+            - sqs:GetQueueUrl
+            - sns:Publish
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - logs:CreateLogStream
+            - logs:DescribeLogGroups
+            - logs:DescribeLogStreams
+            - logs:DeleteLogGroup
+            - logs:PutLogEvents
+          Resource: arn:aws:logs:*:*:log-group:/aws/elasticbeanstalk/*
+  
+  # Cloudwatch Alarms
+  DatahubBuddyEBEnvironmentHealthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: AlarmsEnabled
+    Properties:
+        AlarmDescription: !Sub '${AWS::StackName} elastic beanstalk environment health alarm'
+        AlarmActions:
+          - !Ref DatalakeNotificationTopic
+        MetricName: EnvironmentHealth
+        Namespace: AWS/ElasticBeanstalk
+        Statistic: Maximum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 20 # 20(Degraded), 25(Severe)
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        Dimensions:
+          - Name: EnvironmentName
+            Value: !Ref DatahubBuddyEBSEnvironment
+        TreatMissingData: 'notBreaching'
+
+  # Note this captures all EC2 instances. 
+  # Use Cloudwatch metric to figure out which instance triggered this alarm.
+  DatahubBuddyEBApplicationRequests5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: AlarmsEnabled
+    Properties:
+        AlarmDescription: !Sub '${AWS::StackName} EC2 instance ApplicationRequests5xx alarm.'
+        AlarmActions:
+          - !Ref DatalakeNotificationTopic
+        MetricName: ApplicationRequests5xx
+        Namespace: AWS/ElasticBeanstalk
+        Statistic: Maximum
+        Period: 60
+        EvaluationPeriods: 2
+        Threshold: 0
+        ComparisonOperator: GreaterThanThreshold
+        Dimensions:
+          - Name: EnvironmentName
+            Value: !Ref DatahubBuddyEBSEnvironment
+        TreatMissingData: 'notBreaching'
+
+  # Elasticbeanstalk Resources
+  DatahubBuddyEBSApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties: 
+      ApplicationName: !Sub '${AWS::StackName}'
+      Description: !Sub "${AWS::StackName} Web Application in ${Environment}"
+      ResourceLifecycleConfig: 
+        ServiceRole: !GetAtt DatahubBuddyEbstalkServiceRole.Arn
+        VersionLifecycleConfig: 
+          MaxAgeRule: 
+            DeleteSourceFromS3: !Ref DeleteSourceFromS3Enabled
+            Enabled: true
+            MaxAgeInDays: !Ref MaxAgeInDays
+
+  DatahubBuddyEBSApplicationVersion:
+    Type: AWS::ElasticBeanstalk::ApplicationVersion
+    Properties: 
+      ApplicationName: !Ref DatahubBuddyEBSApplication 
+      Description: !Sub "${AWS::StackName} EBS application version for ${Environment}"
+      SourceBundle: 
+        S3Bucket: !Ref EBSApplicationVersionSourceBucket
+        S3Key: !Ref EBSApplicationVersionSourceKey
+  
+  DatahubBuddyEBSConfigurationTemplate:
+    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+    DependsOn: 
+      - ALBSecurityGroup
+    Properties: 
+      ApplicationName: !Ref DatahubBuddyEBSApplication
+      Description: !Sub "${AWS::StackName} EBS configuration template for ${Environment}"
+      SolutionStackName: '64bit Amazon Linux 2018.03 v2.20.2 running Multi-container Docker 19.03.6-ce (Generic)'
+      # SolutionStackName: '64bit Amazon Linux 2018.03 v2.18.0 running Multi-container Docker 18.09.9-ce (Generic)'
+      OptionSettings:
+        - 
+          Namespace: aws:autoscaling:asg
+          OptionName: MinSize
+          Value: !Ref ASGMinSize
+
+        - Namespace: aws:autoscaling:asg
+          OptionName: MaxSize
+          Value: !Ref ASGMaxSize
+        - Namespace: aws:autoscaling:asg
+          OptionName: Cooldown
+          Value: 120
+        - 
+          Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: EC2KeyName
+          Value: !Ref EC2KeyPairName
+        - 
+          Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: IamInstanceProfile
+          Value: !GetAtt DatahubBuddyInstanceProfile.Arn
+        - 
+          Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: SSHSourceRestriction
+          Value: !Sub "tcp, 22, 22, ${BastionHostCIDRBlock}"
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: BreachDuration
+          Value: 1 
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: LowerBreachScaleIncrement
+          Value: -1 
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: LowerThreshold
+          Value: 10
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: MeasureName
+          Value: RequestCount
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: Period
+          Value: 1 
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: EvaluationPeriods
+          Value: 1 
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: Statistic
+          Value: Sum
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: Unit
+          Value: Count
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: UpperBreachScaleIncrement
+          Value: 1
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: UpperThreshold
+          Value: 15
+#        -
+#          Namespace: "aws:autoscaling:updatepolicy:rollingupdate"
+#          OptionName: RollingUpdateEnabled
+#          Value: true
+#        -
+#          Namespace: "aws:autoscaling:updatepolicy:rollingupdate"
+#          OptionName: RollingUpdateType
+#          Value: Immutable
+        - 
+          Namespace: "aws:ec2:instances"
+          OptionName: InstanceTypes
+          Value: !Ref EC2InstanceType
+        - 
+          Namespace: "aws:ec2:vpc"
+          OptionName: VPCId
+          Value: !Sub "${VpcId}"        
+        - 
+          Namespace: "aws:ec2:vpc"
+          OptionName: Subnets
+          Value: 
+            Fn::Join:
+              - ","
+              - Ref: VpcInstanceSubnetIds
+        -       
+          Namespace: "aws:ec2:vpc"
+          OptionName: ELBSubnets
+          Value:
+             Fn::Join:
+              - ","
+              - Ref: ELBSubnetIds        
+        - 
+          Namespace: "aws:ec2:vpc"
+          OptionName: ELBScheme
+          Value: !Ref ELBVisibility
+        - 
+          Namespace: "aws:elasticbeanstalk:application"
+          OptionName: "Application Healthcheck URL"
+          Value: !Ref LbHealthCheckPath
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs"
+          OptionName: StreamLogs
+          Value: true
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs"
+          OptionName: DeleteOnTerminate
+          Value: false    
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs"
+          OptionName: RetentionInDays
+          Value: !Ref LogRetentionInDays  
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs:health"
+          OptionName: HealthStreamingEnabled
+          Value: true
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs:health"
+          OptionName: DeleteOnTerminate
+          Value: false
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs:health"
+          OptionName: RetentionInDays
+          Value: !Ref LogRetentionInDays
+        - 
+          Namespace: "aws:elasticbeanstalk:command"
+          OptionName: DeploymentPolicy
+          Value: AllAtOnce # Immutable
+        - 
+          Namespace: "aws:elasticbeanstalk:command"
+          OptionName: Timeout
+          Value: 600
+        - 
+          Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: EnvironmentType
+          Value: LoadBalanced                     
+        - 
+          Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: ServiceRole
+          Value: !GetAtt DatahubBuddyEbstalkServiceRole.Arn
+        - 
+          Namespace: "aws:elasticbeanstalk:healthreporting:system"
+          OptionName: SystemType
+          Value: enhanced
+        - 
+          Namespace: "aws:elasticbeanstalk:healthreporting:system"
+          OptionName: ConfigDocument
+          Value:
+            '{
+              "CloudWatchMetrics": {
+                "Environment": {
+                  "InstancesSevere": 60,
+                  "InstancesDegraded": 60,
+                  "ApplicationRequests5xx": 60
+                },
+                "Instance": {
+                  "LoadAverage1min": 60,
+                  "ApplicationRequests5xx": 60,
+                  "InstanceHealth": 60
+                }
+              },
+              "Version": 1
+          }'
+        -
+          Namespace: "aws:elasticbeanstalk:sns:topics"
+          OptionName: Notification Topic ARN
+          Value: !Ref DatalakeNotificationTopic
+        - 
+          Namespace: "aws:elb:loadbalancer"
+          OptionName: CrossZone
+          Value: !Ref CrossZoneLoadBalancingEnabled
+        - 
+          Namespace: "aws:elb:loadbalancer"
+          OptionName: SecurityGroups
+          Value: !Ref ALBSecurityGroup
+        - 
+          Namespace: "aws:elb:loadbalancer"
+          OptionName: ManagedSecurityGroup
+          Value: !Ref ALBSecurityGroup
+        # - 
+        #   Namespace: "aws:elb:listener:443"
+        #   OptionName: ListenerProtocol
+        #   Value: HTTPS
+        # - 
+        #   Namespace: "aws:elb:listener:443"
+        #   OptionName: InstancePort
+        #   Value: 80
+        # - 
+        #   Namespace: "aws:elb:listener:443"
+        #   OptionName: InstanceProtocol
+        #   Value: HTTP
+        # - 
+        #   Namespace: "aws:elb:listener:443"
+        #   OptionName: SSLCertificateId
+        #   Value: !Ref CertificateArn               
+        - 
+          Namespace: "aws:elb:policies"
+          OptionName: ConnectionDrainingEnabled
+          Value: !Ref ConnectionDrainingEnabled
+        
+
+
+  DatahubBuddyEBSEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      ApplicationName: !Ref DatahubBuddyEBSApplication
+      EnvironmentName: !Sub "${AWS::StackName}-${Environment}"
+      Description: !Sub "${AWS::StackName} EBS environment ${Environment}"
+      TemplateName: !Ref DatahubBuddyEBSConfigurationTemplate
+      Tier: 
+        Name: WebServer
+        Type: Standard
+      VersionLabel: !Ref DatahubBuddyEBSApplicationVersion
+
+Outputs:
+  DatalakeNotificationTopicArn:
+    Description: The SNS Topic ARN used for CloudWatch Alarm Notifications
+    Value: !Ref DatalakeNotificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-DatalakeNotificationTopicArn'  
+  DatahubBuddyEC2RoleArn:
+    Description: IAM Role ARN for the Elastic Beanstalk ASG EC2 instances.
+    Value: !GetAtt DatahubBuddyEC2Role.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-EC2RoleArn'
+  DatahubBuddyEbstalkServiceRoleArn:
+    Description: IAM Role ARN for the Elastic Beanstalk Application.
+    Value: !GetAtt DatahubBuddyEbstalkServiceRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-EbstalkServiceRoleArn'
+  DatahubBuddyEBEnvironmentName:
+    Description: Name of the elastic beanstalk environment for web server app.
+    Value: !Ref DatahubBuddyEBSEnvironment
+    Export:
+      Name: !Sub '${AWS::StackName}-EBEnvironmentName'
+  DatahubBuddyEBLoadBalancerURL:
+    Description: URL of the load balancer for web server app.
+    Value: !GetAtt DatahubBuddyEBSEnvironment.EndpointURL
+    Export:
+      Name: !Sub '${AWS::StackName}-EBLoadBalancerURL'
+  DatahubBuddyEBEnvironmentHealthAlarmArn:
+    Description: Arn of Cloudwatch Alarm for the elastic beanstalk environment health metric.
+    Value: !GetAtt DatahubBuddyEBEnvironmentHealthAlarm.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-EBEnvironmentHealthAlarmArn'
+  DatahubBuddyEBApplicationRequests5xxAlarmArn:
+    Description: Arn of Cloudwatch Alarm for the elastic beanstalk Application Requests 5xx metric (Environment type).
+    Value: !GetAtt DatahubBuddyEBApplicationRequests5xxAlarm.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-EBApplicationRequests5xxAlarmArn'
+
+# Stack parameters in Dev Datahub AWS account ca-central-1 region
+# AlarmsEnabled	true	-
+# CertificateArn	arn:aws:acm:ca-central-1:366175784462:certificate/1aef66fe-923d-43a7-84c3-2c7f601fa138	-
+# ConnectionDrainingEnabled	true	-
+# CrossZoneLoadBalancingEnabled	true	-
+# DeleteSourceFromS3Enabled	true	-
+# EBSApplicationVersionSourceBucket	elasticbeanstalk-ca-central-1-366175784462	-
+# EBSApplicationVersionSourceKey	2020150Zjw-eb-docker-nginx-proxy.zip	-
+# EC2InstanceType	t2.medium	-
+# EC2KeyPairName	datahub-dev-datalake-ca-central-kp	-
+# ELBSubnetIds	subnet-04b0f2d5265f8021d,subnet-0303f128f86d50cb0	-
+# ELBVisibility	public	-
+# Environment	dev	-
+# LbHealthCheckPath	/	-
+# LogRetentionInDays	1	-
+# MaxAgeInDays	30	-
+# VpcId	vpc-061aa430965a45ca3	-
+# VpcInstanceSubnetIds	subnet-0e6cb877c1ca9a24e,subnet-09e4b1747902296bd	-
+
+# Stack parameters in Lab Apollo AWS account us-west-1 region
+#ASGMaxSize	6	-
+#ASGMinSize	1	-
+#AlarmsEnabled	true	-
+#BastionHostCIDRBlock	10.192.10.187/32	-
+#ConnectionDrainingEnabled	true	-
+#CrossZoneLoadBalancingEnabled	true	-
+#DeleteSourceFromS3Enabled	true	-
+#EBSApplicationVersionSourceBucket	elasticbeanstalk-us-west-1-368057246517	-
+#EBSApplicationVersionSourceKey	2020150A8y-eb-docker-nginx-proxy.zip	-
+#EC2InstanceType	t2.medium	-
+#EC2KeyPairName	development-datalake-ca-central-kp	-
+#ELBSubnetIds	subnet-0cd3ee98b25c6ec7c,subnet-0f6fcfcfc3460d638	-
+#ELBVisibility	public	-
+#Environment	dev	-
+#HTTPLocation	45.41.170.124/32	-
+#LbHealthCheckPath	/	-
+#LogRetentionInDays	1	-
+#MaxAgeInDays	30	-
+#VpcId	vpc-04c09dba8401a4ca6	-
+#VpcInstanceSubnetIds	subnet-056cef2cfc9c94f40,subnet-0ab6c3cc8c5dc8a78	-
