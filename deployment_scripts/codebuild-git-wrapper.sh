@@ -64,4 +64,4 @@ if [ ! -d  .git ] ; then
   exit 1
 fi
 
-mv .git "$WORKING_DIR"
+#mv .git "$WORKING_DIR"
