@@ -249,7 +249,6 @@ Resources:
               - arn:aws:s3:::elasticbeanstalk-*/*
           - Effect: Allow
             Action:
-              - s3:*
               - s3:Get*
               - s3:List*
               - s3:PutObject
