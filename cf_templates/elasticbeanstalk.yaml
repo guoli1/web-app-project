@@ -180,36 +180,7 @@ Resources:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: "/"
-      Roles: [!Ref DatahubBuddyEC2Role] 
-  
-  DatahubBuddyEC2RoleElasticbeanstalkS3Policy:
-    Type: AWS::IAM::Policy
-    Properties:
       Roles: [!Ref DatahubBuddyEC2Role]
-      PolicyName: !Sub "${AWS::StackName}-elasticbeanstalk-s3-policy"
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - s3:Get*
-              - s3:List*
-              - s3:PutObject
-              - s3:PutObjectAcl
-              - s3:DeleteObject
-            Resource:
-              - arn:aws:s3:::elasticbeanstalk-*
-              - arn:aws:s3:::elasticbeanstalk-*/*
-          - Effect: Allow
-            Action:
-              - s3:Get*
-              - s3:List*
-              - s3:PutObject
-              - s3:PutObjectAcl
-              - s3:DeleteObject
-            Resource:
-              - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}'
-              - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}/*'
 
   DatahubBuddyEC2RoleCloudWatchPolicy:
     Type: AWS::IAM::Policy
@@ -257,6 +228,36 @@ Resources:
             Principal:
               Service: elasticbeanstalk.amazonaws.com
             Action: sts:AssumeRole
+
+  DatahubBuddyEC2AndServiceRoleElasticbeanstalkS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref DatahubBuddyEC2Role, !Ref DatahubBuddyEbstalkServiceRole]
+      PolicyName: !Sub "${AWS::StackName}-elasticbeanstalk-s3-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:Get*
+              - s3:List*
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:DeleteObject
+            Resource:
+              - arn:aws:s3:::elasticbeanstalk-*
+              - arn:aws:s3:::elasticbeanstalk-*/*
+          - Effect: Allow
+            Action:
+              - s3:*
+              - s3:Get*
+              - s3:List*
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:DeleteObject
+            Resource:
+              - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}'
+              - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}/*'
 
   DatahubBuddyEbstalkServiceRolePolicy:
     Type: AWS::IAM::Policy
