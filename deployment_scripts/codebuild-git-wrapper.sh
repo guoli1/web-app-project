@@ -1,5 +1,10 @@
 #!/bin/bash -eu
 
+DIRECTORY=.git
+if [ -d "$DIRECTORY" ]; then
+  echo "$DIRECTORY does exist."
+  exit 0
+fi
 # This is a workaround for a limitation of CodeBuild / CodePipeline, where the git metadata is missing.
 # It brings in the git metadata by checking out the repository and winding it to the currently building commit.
 # See https://itnext.io/how-to-access-git-metadata-in-codebuild-when-using-codepipeline-codecommit-ceacf2c5c1dc?
@@ -64,4 +69,4 @@ if [ ! -d  .git ] ; then
   exit 1
 fi
 
-#mv .git "$WORKING_DIR"
+mv -n .git "$WORKING_DIR"
