@@ -87,9 +87,11 @@ fi
 dist_folder_name=dist
 
 # Create source code zip file
-rm -rf $PROJECT_NAME/$dist_folder_name
-mkdir $PROJECT_NAME/$dist_folder_name
-zip -r $PROJECT_NAME/$dist_folder_name/$FILE_NAME $PROJECT_NAME/. -x "*dist*" -x ".DS_Store" -x "__MACOSX"
+cd $PROJECT_NAME
+rm -rf $dist_folder_name
+mkdir $dist_folder_name
+zip -r $dist_folder_name/$FILE_NAME . -x "*dist*" -x ".DS_Store" -x "__MACOSX"
+cd ..
 
 # List files under $PROJECT_NAME/$dist_folder_name/ folder
 echo `pwd`"/$PROJECT_NAME/$dist_folder_name/ folder contains:"

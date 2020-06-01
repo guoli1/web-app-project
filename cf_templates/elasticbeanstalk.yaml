@@ -196,6 +196,7 @@ Resources:
               - s3:List*
               - s3:PutObject
               - s3:PutObjectAcl
+              - s3:DeleteObject
             Resource:
               - arn:aws:s3:::elasticbeanstalk-*
               - arn:aws:s3:::elasticbeanstalk-*/*
@@ -205,6 +206,7 @@ Resources:
               - s3:List*
               - s3:PutObject
               - s3:PutObjectAcl
+              - s3:DeleteObject
             Resource:
               - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}'
               - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}/*'
