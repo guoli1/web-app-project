@@ -1,0 +1,43 @@
+version: 0.2
+
+env:
+  variables:
+      ENVIRONMENT_NAME: "development"
+      S3_ARTIFACT_BUCKET: "development-datalake-artifact"
+      INCREMENT_LEVEL: "patch"
+      PROJECT_NAME: "eb-docker-nginx-proxy"
+      FILE_NAME: "eb-docker-nginx-proxy.zip"
+  git-credential-helper: yes
+
+phases:
+  install:
+    #If you use the Ubuntu standard image 2.0 or later, you must specify runtime-versions.
+    #If you specify runtime-versions and use an image other than Ubuntu standard image 2.0, the build fails.
+    runtime-versions:
+       nodejs: 10
+  pre_build:
+    commands:
+       - npm install -g semver@5.4.1
+  build:
+    commands:
+       - echo Build started on `date`
+       - set -e
+       - set +x
+       - ls -la
+       - sh deployment_scripts/validate_environment_name.sh -e $ENVIRONMENT_NAME
+       - sh deployment_scripts/validate_semver_increment_level.sh -i $INCREMENT_LEVEL
+       - sh deployment_scripts/build_eb_version_zip_artifact.sh -f $FILE_NAME -p $PROJECT_NAME
+       - sh deployment_scripts/get_incremented_build_version.sh -e $ENVIRONMENT_NAME -p $PROJECT_NAME -i $INCREMENT_LEVEL
+  post_build:
+    commands:
+       - NEW_VERSION=$(cat incrementedVersion.txt)
+       - NEW_TAG_NAME=$(cat incrementedTagName.txt)
+       - echo "The incremented version number is $NEW_VERSION"
+       - echo "Trying to tag $NEW_TAG_NAME"
+       - git tag "$NEW_TAG_NAME"
+       - git push --tags
+       - echo "Git tag $NEW_TAG_NAME pushed"
+       - ARTIFACT_S3_KEY=$ENVIRONMENT_NAME/$PROJECT_NAME/$NEW_VERSION/$FILE_NAME
+       - echo "Uploading zip file to s3"
+       - aws s3 cp target/$FILE_NAME s3://$S3_ARTIFACT_BUCKET/$ARTIFACT_S3_KEY --acl bucket-owner-full-control
+       - echo Build completed on `date`

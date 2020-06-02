@@ -1,0 +1,19 @@
+version: 0.2
+
+env:
+  git-credential-helper: yes
+
+phases:
+  build:
+    commands:
+       - echo Build started on `date`
+       - ls -la
+  post_build:
+    commands:
+       - echo Build completed on `date`
+artifacts:
+  files:
+    - elasticbeanstalk.yaml
+    - development-stack-configuration.json
+  discard-paths: no
+  base-directory: cf_templates
