@@ -7,7 +7,7 @@ set -e
 set +x
 
 # example command to run script:
-#sh deployment_scripts/localBuildAndPublishAppArtifactToS3.sh -f eb-docker-nginx-proxy.zip -p eb-docker-nginx-proxy
+#sh deployment_scripts/local_build_and_publish_app_artifact_to_S3.sh -f eb-docker-nginx-proxy.zip -p eb-docker-nginx-proxy
 
 usage(){
     echo "Usage: "

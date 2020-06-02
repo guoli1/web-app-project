@@ -15,7 +15,7 @@ fi
 
 # example command to run script:
 #REPO_URL="https://github.com/guoli1/web-app-project.git"
-#sh deployment_scripts/codebuild-git-wrapper.sh $REPO_URL
+#sh deployment_scripts/codebuild_git_wrapper.sh $REPO_URL
 
 # This function prints the usage
 function usage {
