@@ -13,6 +13,10 @@ fi
 # (C) Timothy Jones, https://github.com/TimothyJones/codepipeline-git-metadata-example
 # MIT License, see https://github.com/TimothyJones/codepipeline-git-metadata-example/blob/master/LICENSE
 
+# example command to run script:
+#REPO_URL="https://github.com/guoli1/web-app-project.git"
+#sh deployment_scripts/codebuild-git-wrapper.sh $REPO_URL
+
 # This function prints the usage
 function usage {
   {
