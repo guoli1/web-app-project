@@ -10,7 +10,7 @@
     "EBSApplicationVersionSourceBucket" : "development-datalake-artifact",
     "EBSApplicationVersionSourceKey" : "development/eb-docker-nginx-proxy/0.0.41/eb-docker-nginx-proxy.zip",
     "EC2InstanceType" : "t2.micro",
-    "EC2KeyPairName" : "development-datalake-ca-central-kp",
+    "EC2KeyPairName" : "development-datalake-us-west-1-kp",
     "ELBSubnetIds" : "subnet-0cd3ee98b25c6ec7c,subnet-0f6fcfcfc3460d638",
     "ELBVisibility" : "public",
     "Environment" : "dev",
