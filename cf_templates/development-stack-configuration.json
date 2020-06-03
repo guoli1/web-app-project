@@ -3,7 +3,7 @@
     "ASGMaxSize" : "6",
     "ASGMinSize" : "2",
     "AlarmsEnabled" : "true",
-    "BastionHostCIDRBlock" : "10.192.10.222/32",
+    "BastionHostSecurityGroupID" : "sg-0dcc858b3785f8e56",
     "ConnectionDrainingEnabled" : "true",
     "CrossZoneLoadBalancingEnabled" : "true",
     "DeleteSourceFromS3Enabled" : "true",

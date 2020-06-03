@@ -91,13 +91,10 @@ Parameters:
     MaxLength: '18'
     AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
     ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
-  BastionHostCIDRBlock:
-    Description: The private IP address of the bastion host EC2 instances.
-    Type: String
-    MinLength: '9'
-    MaxLength: '18'
-    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
-    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.  
+  BastionHostSecurityGroupID:
+    Type: AWS::EC2::SecurityGroup::Id
+    MinLength: 1
+    Description: Security group ID of bastion host EC2 instance.
 Metadata: 
   AWS::CloudFormation::Interface: 
     ParameterGroups:
@@ -117,7 +114,7 @@ Metadata:
           - VpcInstanceSubnetIds
           - ASGMinSize
           - ASGMaxSize
-          - BastionHostCIDRBlock
+          - BastionHostSecurityGroupID
       - Label:
           default: "Elastic Beanstalk Load Balancer"
         Parameters:
@@ -400,7 +397,7 @@ Resources:
         - 
           Namespace: "aws:autoscaling:launchconfiguration"
           OptionName: SSHSourceRestriction
-          Value: !Sub "tcp, 22, 22, ${BastionHostCIDRBlock}"
+          Value: !Sub "tcp, 22, 22, ${BastionHostSecurityGroupID}"
         - 
           Namespace: "aws:autoscaling:trigger"
           OptionName: BreachDuration
