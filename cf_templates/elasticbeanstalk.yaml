@@ -19,11 +19,11 @@ Parameters:
   EBSApplicationVersionSourceBucket:
     Type: String
     Description: S3 bucket where the EBS application version file is stored.
-    Default: elasticbeanstalk-us-west-1-368057246517
+    MinLength: 1
   EBSApplicationVersionSourceKey:
     Type: String
     Description: S3 key where the EBS application version file is stored.
-    Default: 2020150A8y-eb-docker-nginx-proxy.zip
+    MinLength: 1
   EC2KeyPairName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: Name of the EC2 key pair used to ssh into the web app instance.
