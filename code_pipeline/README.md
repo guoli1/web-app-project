@@ -1,4 +1,4 @@
-# AWS CodePipeline WorkFlow for Elastic Beanstalk Web Application CI/CD
+# AWS CodePipeline WorkFlow for Elastic Beanstalk Web Application
 
 This workflow diagram below shows the stages in the AWS CodePipeline that 
 automatically builds the CloudFormation and Elastic Beanstalk Application
