@@ -118,7 +118,7 @@ Resources:
               StringEquals:
                 ec2:Subnet:
                 - !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${CodeBuildEnvironmentSubnetID1}"
-                - !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}/${CodeBuildEnvironmentSubnetID2}"
+                - !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet//${CodeBuildEnvironmentSubnetID2}"
                 ec2:AuthorizedService: codebuild.amazonaws.com
 
   CodePipelineEBWebAppServiceRole:
