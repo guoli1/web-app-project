@@ -1,0 +1,384 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This CloudFormation templates creates the IAM service role for the AWS CodeBuild and AWS CodePipeline.
+  It also creates a IAM role assumed by the CodePipeline to deploy CloudFormation stack changes.
+Parameters:
+  CodeBuildArtifactBucketName:
+    Type: String
+    Description: Name of the S3 bucket where the AWS CodeBuild artifact files are stored.
+    Default: development-datalake-artifact
+    ConstraintDescription: Must be a valid S3 bucket name
+  CodeBuildProjectName:
+    Type: String
+    Description: Name of the AWS CodeBuild project.
+    Default: Development-EB-Web-App-Artifacts-Build
+  CodeBuildEnvironmentSubnetID1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet in AZ 1 to host CodeBuild Environment EC2 instance.
+  CodeBuildEnvironmentSubnetID2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet in AZ 2 to host CodeBuild Environment EC2 instance.
+  CodePipelineName:
+    Type: String
+    Description: Name of the AWS CodePipeline.
+    Default: Development-web-app-CF-pipeline
+Resources:
+  CodeBuildEBWebAppServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Path: /service-role/
+      RoleName: !Sub "codebuild-${CodeBuildProjectName}-service-role"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - codebuild.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+  CodeBuildEBWebAppServiceRoleCloudWatchPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodeBuildEBWebAppServiceRole]
+      PolicyName: !Sub "${CodeBuildProjectName}-cloudwatch-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogStreams
+              - logs:PutRetentionPolicy
+            Resource:
+              - "arn:aws:logs:*:*:*"
+
+  CodeBuildEBWebAppServiceRoleS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodeBuildEBWebAppServiceRole]
+      PolicyName: !Sub "${CodeBuildProjectName}-s3-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:PutObject"
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:GetBucketAcl"
+              - "s3:GetBucketLocation"
+            Resource:
+              - !Sub "arn:aws:s3:::codepipeline-${AWS::Region}-*"
+              - !Sub "arn:aws:s3:::${CodeBuildArtifactBucketName}"
+              - !Sub "arn:aws:s3:::${CodeBuildArtifactBucketName}/*"
+
+  CodeBuildEBWebAppServiceRoleCodeBuildPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodeBuildEBWebAppServiceRole]
+      PolicyName: !Sub "${CodeBuildProjectName}-codebuild-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - "codebuild:CreateReportGroup"
+              - "codebuild:CreateReport"
+              - "codebuild:UpdateReport"
+              - "codebuild:BatchPutTestCases"
+            Resource:
+              - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/${CodeBuildProjectName}-*"
+
+  CodeBuildEBWebAppServiceRoleEC2Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodeBuildEBWebAppServiceRole]
+      PolicyName: !Sub "${CodeBuildProjectName}-ec2-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+            - ec2:CreateNetworkInterface
+            - ec2:DescribeDhcpOptions
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DeleteNetworkInterface
+            - ec2:DescribeSubnets
+            - ec2:DescribeSecurityGroups
+            - ec2:DescribeVpcs
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - ec2:CreateNetworkInterfacePermission
+            Resource: !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+            Condition:
+              StringEquals:
+                ec2:Subnet:
+                - !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${CodeBuildEnvironmentSubnetID1}"
+                - !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}/${CodeBuildEnvironmentSubnetID2}"
+                ec2:AuthorizedService: codebuild.amazonaws.com
+
+  CodePipelineEBWebAppServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Path: /service-role/
+      RoleName: !Sub "codepipeline-${CodePipelineName}-service-role"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - codepipeline.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+
+  CodePipelineEBWebAppServiceRoleIamPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppServiceRole]
+      PolicyName: !Sub "${CodePipelineName}-iam-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: "*"
+            Condition:
+              StringEqualsIfExists:
+                iam:PassedToService:
+                  - cloudformation.amazonaws.com
+                  - elasticbeanstalk.amazonaws.com
+                  - ec2.amazonaws.com
+                  - ecs-tasks.amazonaws.com
+
+  CodePipelineEBWebAppServiceRoleCodeCommitPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppServiceRole]
+      PolicyName: !Sub "${CodePipelineName}-codecommit-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - codecommit:CancelUploadArchive
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:UploadArchive
+            Resource: "*"
+
+  CodePipelineEBWebAppServiceRoleCodeBuildPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppServiceRole]
+      PolicyName: !Sub "${CodePipelineName}-codebuild-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - codebuild:BatchGetBuilds
+              - codebuild:StartBuild
+            Resource: "*"
+
+  CodePipelineEBWebAppServiceRoleCodeDeployPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppServiceRole]
+      PolicyName: !Sub "${CodePipelineName}-codedeploy-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - codedeploy:CreateDeployment
+              - codedeploy:GetApplication
+              - codedeploy:GetApplicationRevision
+              - codedeploy:GetDeployment
+              - codedeploy:GetDeploymentConfig
+              - codedeploy:RegisterApplicationRevision
+            Resource: "*"
+
+  CodePipelineEBWebAppServiceRoleCloudFormationPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppServiceRole]
+      PolicyName: !Sub "${CodePipelineName}-cloudformation-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:DeleteStack
+              - cloudformation:DescribeStacks
+              - cloudformation:UpdateStack
+              - cloudformation:CreateChangeSet
+              - cloudformation:DeleteChangeSet
+              - cloudformation:DescribeChangeSet
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:SetStackPolicy
+              - cloudformation:ValidateTemplate
+            Resource: "*"
+
+  CodePipelineEBWebAppServiceRoleOtherPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppServiceRole]
+      PolicyName: !Sub "${CodePipelineName}-other-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - codestar-connections:UseConnection
+              - elasticbeanstalk:*
+              - ec2:*
+              - elasticloadbalancing:*
+              - autoscaling:*
+              - cloudwatch:*
+              - s3:*
+              - sns:*
+              - cloudformation:*
+              - rds:*
+              - sqs:*
+              - ecs:*
+              - lambda:InvokeFunction
+              - lambda:ListFunctions
+              - opsworks:CreateDeployment
+              - opsworks:DescribeApps
+              - opsworks:DescribeCommands
+              - opsworks:DescribeDeployments
+              - opsworks:DescribeInstances
+              - opsworks:DescribeStacks
+              - opsworks:UpdateApp
+              - opsworks:UpdateStack
+              - devicefarm:ListProjects
+              - devicefarm:ListDevicePools
+              - devicefarm:GetRun
+              - devicefarm:GetUpload
+              - devicefarm:CreateUpload
+              - devicefarm:ScheduleRun
+              - servicecatalog:ListProvisioningArtifacts
+              - servicecatalog:CreateProvisioningArtifact
+              - servicecatalog:DescribeProvisioningArtifact
+              - servicecatalog:DeleteProvisioningArtifact
+              - servicecatalog:UpdateProduct
+              - ecr:DescribeImages
+              - states:DescribeExecution
+              - states:DescribeStateMachine
+              - states:StartExecution
+            Resource: "*"
+
+  CodePipelineEBWebAppCloudFormationAssumedRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Path: /service-role/
+      RoleName: !Sub "codepipeline-${CodePipelineName}-CFN-role"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - cloudformation.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+
+  CodePipelineEBWebAppCloudFormationAssumedRoleCloudWatchPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppCloudFormationAssumedRole]
+      PolicyName: !Sub "${CodePipelineName}-CFN-cloudwatch-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:DescribeLogGroups
+              - logs:CreateLogGroup
+              - logs:DeleteLogGroup
+              - logs:PutSubscriptionFilter
+              - logs:PutRetentionPolicy
+              - logs:DeleteSubscriptionFilter
+            Resource: "*"
+
+  CodePipelineEBWebAppCloudFormationAssumedRoleS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppCloudFormationAssumedRole]
+      PolicyName: !Sub "${CodePipelineName}-CFN-S3-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:*
+            Resource:
+              - arn:aws:s3:::elasticbeanstalk-*
+              - arn:aws:s3:::elasticbeanstalk-*/*
+              - arn:aws:s3:::codepipeline-*
+              - arn:aws:s3:::codepipeline-*/*
+              - !Sub "arn:aws:s3:::${CodeBuildArtifactBucketName}"
+              - !Sub "arn:aws:s3:::${CodeBuildArtifactBucketName}/*"
+
+  CodePipelineEBWebAppCloudFormationAssumedRoleReadOnlyPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppCloudFormationAssumedRole]
+      PolicyName: !Sub "${CodePipelineName}-CFN-read-only-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+              - rds:Describe*
+              - sqs:Get*
+              - sqs:List*
+            Resource: "*"
+
+  CodePipelineEBWebAppCloudFormationAssumedRoleDeployPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref CodePipelineEBWebAppCloudFormationAssumedRole]
+      PolicyName: !Sub "${CodePipelineName}-CFN-deploy-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - autoscaling:*
+              - cloudformation:*
+              - ec2:*
+              - elasticloadbalancing:*
+              - elasticbeanstalk:*
+              - cloudwatch:*
+              - ecs:*
+              - application-autoscaling:*
+              - iam:*
+              - sns:*
+            Resource: "*"
+
+Outputs:
+  CodeBuildEBWebAppServiceRoleArn:
+    Description: IAM Role ARN for the AWS CodeBuild EB Web App Service Role.
+    Value: !GetAtt CodeBuildEBWebAppServiceRole.Arn
+    Export:
+      Name: !Sub "${CodeBuildProjectName}-CodeBuildEBWebAppServiceRoleArn"
+  CodePipelineEBWebAppServiceRoleArn:
+    Description: IAM Role ARN for the AWS CodePipeline EB Web App Service Role.
+    Value: !GetAtt CodePipelineEBWebAppServiceRole.Arn
+    Export:
+      Name: !Sub "${CodePipelineName}-CodePipelineEBWebAppServiceRoleArn"
+  CodePipelineEBWebAppCloudFormationAssumedRoleArn:
+    Description: IAM Role ARN for the AWS CodePipeline EB Web App CloudFormation assumed Role.
+    Value: !GetAtt CodePipelineEBWebAppCloudFormationAssumedRole.Arn
+    Export:
+      Name: !Sub "${CodePipelineName}-CodePipelineEBWebAppCloudFormationAssumedRoleArn"
