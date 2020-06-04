@@ -42,7 +42,10 @@ Resources:
       Name: !Join ['', [!Ref 'Route53RecordSetName', ., !Ref 'Route53HostedZoneName', .]]
       AliasTarget:
         DNSName:
-          Fn::ImportValue: !Sub "${ElasticBeanstalkStackName}-EB-LoadBalancerURL"
+          "Fn::Join":
+            - ''
+            - - 'dualstack.'
+              - Fn::ImportValue: !Sub "${ElasticBeanstalkStackName}-EB-LoadBalancerURL"
         EvaluateTargetHealth: false
         HostedZoneId:
           Fn::FindInMap:
