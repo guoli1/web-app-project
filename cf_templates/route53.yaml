@@ -7,9 +7,6 @@ Parameters:
     Description: Name of the Route 53 Hosted Zone for Elastic Beanstalk Applications.
     Default: elasticbeanstalk.application.com
     ConstraintDescription: Must be a valid Route53 Hosted Zone name.
-  VpcId:
-    Type: AWS::EC2::VPC::Id
-    Description: VPC Ids that are assciated with the specified hosted zone.
   Route53RecordSetName:
     Type: String
     Description: Name of the Route53 record set. It together with the HostedZoneName forms the DNS record.
@@ -31,9 +28,6 @@ Resources:
     Type: AWS::Route53::HostedZone
     Properties:
       Name: !Join ['', [!Ref 'Route53HostedZoneName', .]]
-      VPCs:
-        - VPCId: !Ref VpcId
-          VPCRegion: !Sub ${AWS::Region}
 
   ElasticBeanstalkRoute53DNSRecord:
     Type: AWS::Route53::RecordSet
