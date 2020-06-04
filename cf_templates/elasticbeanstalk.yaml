@@ -1,0 +1,635 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Creates the Elastic Beanstalk Environment and Application to host the multi-container PHP-FPM + Nginx web app.
+  Also creates the SNS topic to receive Cloudwatch alarm notifications.
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: ['test', 'dev', 'prod']
+    Description: The Environment tag.
+    ConstraintDescription: Must be one of test, dev or prod.
+  DeleteSourceFromS3Enabled:
+    Type: String
+    AllowedValues: [true, false]
+    Description: Enable or disable deletion of a version's source bundle from Amazon S3 when Elastic Beanstalk deletes the application version.
+    Default: true
+  MaxAgeInDays:
+    Type: Number
+    Description: The number of days to retain an application versions.
+    Default: 30
+  EBSApplicationVersionSourceBucket:
+    Type: String
+    Description: S3 bucket where the EBS application version file is stored.
+    MinLength: 1
+  EBSApplicationVersionSourceKey:
+    Type: String
+    Description: S3 key where the EBS application version file is stored.
+    MinLength: 1
+  EC2KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of the EC2 key pair used to ssh into the web app instance.
+  EC2InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues: ["t2.micro", "t2.small", "t2.medium", "t2.large"]
+    Description: The web app EC2 instance type
+    ConstraintDescription: Must be a valid instance type.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy web app EC2 instances.
+  VpcInstanceSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet to distribute EC2 instances. Should belong to selected VPC.
+  ELBSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for the elastic load balancer. Should belong to selected VPC.
+  ELBVisibility:
+    Type: String
+    Description: Accessibility of the ELB to requests from connected VPC or the internet.
+    Default: public
+  CrossZoneLoadBalancingEnabled:
+    Type: String
+    AllowedValues: [true, false]
+    Description: Configure the load balancer to route traffic evenly across all instances in all Availability Zones.
+    Default: true
+  ConnectionDrainingEnabled:
+    Type: String
+    AllowedValues: [true, false]
+    Description: Specifies whether the load balancer maintains existing connections to instances that have become unhealthy or deregistered to complete in-progress requests.
+    Default: true
+  SSLCertificateArn:
+   Type: String
+   Description: SSL/TLS Certificate Arn.
+   MinLength: 0
+   MaxLength: 2048
+   Default: ""
+  LogRetentionInDays:
+    Type: Number
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
+    Description: The number of days to retain the CloudWatch logs.
+    Default: 1
+    ConstraintDescription: Possible values are 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827 and 3653
+  LbHealthCheckPath:
+    Type: String
+    Description: URL for load balancer health check.
+    Default: /
+    ConstraintDescription: Must be a valid Request path for the backend application.
+  AlarmsEnabled:
+    Type: String
+    AllowedValues: [true, false]
+    Description: Enable or disable CloudWatch alarms.
+    Default: true
+  ASGMinSize:
+      Type: Number
+      Description: Min number of instances to scale in to.
+      Default: 1
+  ASGMaxSize:
+      Type: Number
+      Description: Max number of instances to scale out to.
+      Default: 6
+  HTTPLocation:
+    Description: The IP address range that can be used to estalish an HTTP session to the Elastic Load Balancer.
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  BastionHostSecurityGroupID:
+    Type: AWS::EC2::SecurityGroup::Id
+    MinLength: 1
+    Description: Security group ID of bastion host EC2 instance.
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups:
+      - Label: 
+          default: "Elastic Beanstalk App Version"
+        Parameters:
+          - DeleteSourceFromS3Enabled
+          - MaxAgeInDays
+          - EBSApplicationVersionSourceBucket
+          - EBSApplicationVersionSourceKey
+      - Label: 
+          default: "Elastic Beanstalk Instance"
+        Parameters:
+          - EC2KeyPairName
+          - EC2InstanceType
+          - VpcId
+          - VpcInstanceSubnetIds
+          - ASGMinSize
+          - ASGMaxSize
+          - BastionHostSecurityGroupID
+      - Label:
+          default: "Elastic Beanstalk Load Balancer"
+        Parameters:
+          - ELBSubnetIds
+          - ELBVisibility
+          - CrossZoneLoadBalancingEnabled
+          - ConnectionDrainingEnabled
+          - SSLCertificateArn
+          - LbHealthCheckPath
+          - HTTPLocation
+      - Label:
+          default: "Log Retention"
+        Parameters:
+          - LogRetentionInDays
+      - Label: 
+          default: "Alarms"
+        Parameters: 
+          - AlarmsEnabled
+
+Conditions:
+  AlarmsEnabled: !Equals [!Ref AlarmsEnabled, true]
+  TlsEnabled: !Not [ !Equals [ !Ref SSLCertificateArn, "" ] ]
+Resources:
+  # Security Group
+  ELBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for classic load balancer
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: !Ref HTTPLocation
+      VpcId: !Ref VpcId
+
+  # SNS Topic
+  DatalakeNotificationTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-notifications'
+      DisplayName: !Sub 'Notifications for ${AWS::StackName}'
+
+  # IAM Roles, Instance Profiles and Policies
+  ElasticBeanstalkEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly            
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker     
+  
+  ElasticBeanstalkInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles: [!Ref ElasticBeanstalkEC2Role]
+
+  ElasticBeanstalkEC2RoleCloudWatchPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref ElasticBeanstalkEC2Role]
+      PolicyName: !Sub "${AWS::StackName}-cloudwatch-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogStreams
+              - logs:PutRetentionPolicy
+            Resource:
+              - "arn:aws:logs:*:*:*"
+
+  ElasticBeanstalkEC2RoleCloudwatchMetircs:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref ElasticBeanstalkEC2Role]
+      PolicyName: !Sub "${AWS::StackName}-cloudwatch-metrics-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - "cloudwatch:GetMetricData"
+              - "cloudwatch:PutMetricData"            
+              - "cloudwatch:ListMetrics"
+            Resource:
+              - "*"
+
+  ElasticBeanstalkServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: elasticbeanstalk.amazonaws.com
+            Action: sts:AssumeRole
+
+  ElasticBeanstalkEC2AndServiceRoleS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref ElasticBeanstalkEC2Role, !Ref ElasticBeanstalkServiceRole]
+      PolicyName: !Sub "${AWS::StackName}-elasticbeanstalk-s3-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:Get*
+              - s3:List*
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:DeleteObject
+            Resource:
+              - arn:aws:s3:::elasticbeanstalk-*
+              - arn:aws:s3:::elasticbeanstalk-*/*
+          - Effect: Allow
+            Action:
+              - s3:Get*
+              - s3:List*
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:DeleteObject
+            Resource:
+              - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}'
+              - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}/*'
+
+  ElasticBeanstalkServiceRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles: [!Ref ElasticBeanstalkServiceRole]
+      PolicyName: !Sub "${AWS::StackName}-ebs-service-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+            - cloudformation:DescribeStackResource
+            - cloudformation:DescribeStackResources
+            - cloudformation:DescribeStacks
+          Resource:
+            - arn:aws:cloudformation:*:*:stack/awseb-*
+            - arn:aws:cloudformation:*:*:stack/eb-*
+        - Effect: Allow
+          Action:
+            - autoscaling:DescribeAutoScalingGroups
+            - autoscaling:DescribeAutoScalingInstances
+            - autoscaling:DescribeNotificationConfigurations
+            - autoscaling:DescribeScalingActivities
+            - autoscaling:PutNotificationConfiguration
+            - ec2:DescribeInstanceStatus
+            - ec2:AssociateAddress
+            - ec2:DescribeAddresses
+            - ec2:DescribeInstances
+            - ec2:DescribeSecurityGroups
+            - elasticloadbalancing:DescribeInstanceHealth
+            - elasticloadbalancing:DescribeLoadBalancers
+            - elasticloadbalancing:DescribeTargetHealth
+            - elasticloadbalancing:DescribeTargetGroups
+            - lambda:GetFunction
+            - sqs:GetQueueAttributes
+            - sqs:GetQueueUrl
+            - sns:Publish
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - logs:CreateLogStream
+            - logs:DescribeLogGroups
+            - logs:DescribeLogStreams
+            - logs:DeleteLogGroup
+            - logs:PutLogEvents
+          Resource: arn:aws:logs:*:*:log-group:/aws/elasticbeanstalk/*
+  
+  # CloudWatch Alarms
+  ElasticBeanstalkEnvironmentHealthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: AlarmsEnabled
+    Properties:
+        AlarmDescription: !Sub '${AWS::StackName} elastic beanstalk environment health alarm'
+        AlarmActions:
+          - !Ref DatalakeNotificationTopic
+        MetricName: EnvironmentHealth
+        Namespace: AWS/ElasticBeanstalk
+        Statistic: Maximum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 20 # 20(Degraded), 25(Severe)
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        Dimensions:
+          - Name: EnvironmentName
+            Value: !Ref ElasticBeanstalkEnvironment
+        TreatMissingData: 'notBreaching'
+
+  # Note this captures all EC2 instances. 
+  # Use CloudWatch metric to figure out which instance triggered this alarm.
+  ElasticBeanstalkApplicationRequests5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: AlarmsEnabled
+    Properties:
+        AlarmDescription: !Sub '${AWS::StackName} EC2 instance ApplicationRequests5xx alarm.'
+        AlarmActions:
+          - !Ref DatalakeNotificationTopic
+        MetricName: ApplicationRequests5xx
+        Namespace: AWS/ElasticBeanstalk
+        Statistic: Maximum
+        Period: 60
+        EvaluationPeriods: 2
+        Threshold: 0
+        ComparisonOperator: GreaterThanThreshold
+        Dimensions:
+          - Name: EnvironmentName
+            Value: !Ref ElasticBeanstalkEnvironment
+        TreatMissingData: 'notBreaching'
+
+  # Elastic Beanstalk Resources
+  ElasticBeanstalkApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties: 
+      ApplicationName: !Sub '${AWS::StackName}'
+      Description: !Sub "${AWS::StackName} Web Application in ${Environment}"
+      ResourceLifecycleConfig: 
+        ServiceRole: !GetAtt ElasticBeanstalkServiceRole.Arn
+        VersionLifecycleConfig: 
+          MaxAgeRule: 
+            DeleteSourceFromS3: !Ref DeleteSourceFromS3Enabled
+            Enabled: true
+            MaxAgeInDays: !Ref MaxAgeInDays
+
+  ElasticBeanstalkApplicationVersion:
+    Type: AWS::ElasticBeanstalk::ApplicationVersion
+    Properties: 
+      ApplicationName: !Ref ElasticBeanstalkApplication
+      Description: !Sub "${AWS::StackName} EBS application version for ${Environment}"
+      SourceBundle: 
+        S3Bucket: !Ref EBSApplicationVersionSourceBucket
+        S3Key: !Ref EBSApplicationVersionSourceKey
+  
+  ElasticBeanstalkConfigurationTemplate:
+    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+    DependsOn: 
+      - ELBSecurityGroup
+    Properties: 
+      ApplicationName: !Ref ElasticBeanstalkApplication
+      Description: !Sub "${AWS::StackName} EBS configuration template for ${Environment}"
+      SolutionStackName: '64bit Amazon Linux 2018.03 v2.20.2 running Multi-container Docker 19.03.6-ce (Generic)'
+      OptionSettings:
+        - 
+          Namespace: aws:autoscaling:asg
+          OptionName: MinSize
+          Value: !Ref ASGMinSize
+
+        - Namespace: aws:autoscaling:asg
+          OptionName: MaxSize
+          Value: !Ref ASGMaxSize
+        - Namespace: aws:autoscaling:asg
+          OptionName: Cooldown
+          Value: 120
+        - 
+          Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: EC2KeyName
+          Value: !Ref EC2KeyPairName
+        - 
+          Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: IamInstanceProfile
+          Value: !GetAtt ElasticBeanstalkInstanceProfile.Arn
+        - 
+          Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: SSHSourceRestriction
+          Value: !Sub "tcp, 22, 22, ${BastionHostSecurityGroupID}"
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: BreachDuration
+          Value: 1 
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: LowerBreachScaleIncrement
+          Value: -1 
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: LowerThreshold
+          Value: 10
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: MeasureName
+          Value: RequestCount
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: Period
+          Value: 1 
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: EvaluationPeriods
+          Value: 1 
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: Statistic
+          Value: Sum
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: Unit
+          Value: Count
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: UpperBreachScaleIncrement
+          Value: 1
+        - 
+          Namespace: "aws:autoscaling:trigger"
+          OptionName: UpperThreshold
+          Value: 15
+#        -
+#          Namespace: "aws:autoscaling:updatepolicy:rollingupdate"
+#          OptionName: RollingUpdateEnabled
+#          Value: true
+#        -
+#          Namespace: "aws:autoscaling:updatepolicy:rollingupdate"
+#          OptionName: RollingUpdateType
+#          Value: Health
+        - 
+          Namespace: "aws:ec2:instances"
+          OptionName: InstanceTypes
+          Value: !Ref EC2InstanceType
+        - 
+          Namespace: "aws:ec2:vpc"
+          OptionName: VPCId
+          Value: !Sub "${VpcId}"        
+        - 
+          Namespace: "aws:ec2:vpc"
+          OptionName: Subnets
+          Value: 
+            Fn::Join:
+              - ","
+              - Ref: VpcInstanceSubnetIds
+        -       
+          Namespace: "aws:ec2:vpc"
+          OptionName: ELBSubnets
+          Value:
+             Fn::Join:
+              - ","
+              - Ref: ELBSubnetIds        
+        - 
+          Namespace: "aws:ec2:vpc"
+          OptionName: ELBScheme
+          Value: !Ref ELBVisibility
+        - 
+          Namespace: "aws:elasticbeanstalk:application"
+          OptionName: "Application Healthcheck URL"
+          Value: !Ref LbHealthCheckPath
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs"
+          OptionName: StreamLogs
+          Value: true
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs"
+          OptionName: DeleteOnTerminate
+          Value: false    
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs"
+          OptionName: RetentionInDays
+          Value: !Ref LogRetentionInDays  
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs:health"
+          OptionName: HealthStreamingEnabled
+          Value: true
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs:health"
+          OptionName: DeleteOnTerminate
+          Value: false
+        - 
+          Namespace: "aws:elasticbeanstalk:cloudwatch:logs:health"
+          OptionName: RetentionInDays
+          Value: !Ref LogRetentionInDays
+        - 
+          Namespace: "aws:elasticbeanstalk:command"
+          OptionName: DeploymentPolicy
+          Value: AllAtOnce # Rolling
+        - 
+          Namespace: "aws:elasticbeanstalk:command"
+          OptionName: Timeout
+          Value: 600
+        - 
+          Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: EnvironmentType
+          Value: LoadBalanced                     
+        - 
+          Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: ServiceRole
+          Value: !GetAtt ElasticBeanstalkServiceRole.Arn
+        - 
+          Namespace: "aws:elasticbeanstalk:healthreporting:system"
+          OptionName: SystemType
+          Value: enhanced
+        - 
+          Namespace: "aws:elasticbeanstalk:healthreporting:system"
+          OptionName: ConfigDocument
+          Value:
+            '{
+              "CloudWatchMetrics": {
+                "Environment": {
+                  "InstancesSevere": 60,
+                  "InstancesDegraded": 60,
+                  "ApplicationRequests5xx": 60
+                },
+                "Instance": {
+                  "LoadAverage1min": 60,
+                  "ApplicationRequests5xx": 60,
+                  "InstanceHealth": 60
+                }
+              },
+              "Version": 1
+          }'
+        -
+          Namespace: "aws:elasticbeanstalk:sns:topics"
+          OptionName: Notification Topic ARN
+          Value: !Ref DatalakeNotificationTopic
+        -
+          Namespace: "aws:elb:loadbalancer"
+          OptionName: CrossZone
+          Value: !Ref CrossZoneLoadBalancingEnabled
+        -
+          Namespace: "aws:elb:loadbalancer"
+          OptionName: SecurityGroups
+          Value: !Ref ELBSecurityGroup
+        -
+          Namespace: "aws:elb:loadbalancer"
+          OptionName: ManagedSecurityGroup
+          Value: !Ref ELBSecurityGroup
+        -
+         Namespace: !Sub
+           - "aws:elb:listener:${ListenPort}"
+           - ListenPort: !If [ TlsEnabled, 443, 80 ]
+         OptionName: ListenerProtocol
+         Value: !If [ TlsEnabled, HTTPS, HTTP ]
+        -
+         Namespace: !Sub
+           - "aws:elb:listener:${ListenPort}"
+           - ListenPort: !If [ TlsEnabled, 443, 80 ]
+         OptionName: InstancePort
+         Value: !If [ TlsEnabled, 443, 80 ]
+        -
+         Namespace: !Sub
+           - "aws:elb:listener:${ListenPort}"
+           - ListenPort: !If [ TlsEnabled, 443, 80 ]
+         OptionName: InstanceProtocol
+         Value: HTTP
+        -
+         Namespace: !Sub
+           - "aws:elb:listener:${ListenPort}"
+           - ListenPort: !If [ TlsEnabled, 443, 80 ]
+         OptionName: !If [ TlsEnabled, SSLCertificateId, ListenerEnabled]
+         Value: !If [ TlsEnabled, !Ref SSLCertificateArn, true ]
+        -
+         Namespace: "aws:elb:policies"
+         OptionName: ConnectionDrainingEnabled
+         Value: !Ref ConnectionDrainingEnabled
+
+  ElasticBeanstalkEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      ApplicationName: !Ref ElasticBeanstalkApplication
+      EnvironmentName: !Sub "${AWS::StackName}-${Environment}"
+      Description: !Sub "${AWS::StackName} EBS environment ${Environment}"
+      TemplateName: !Ref ElasticBeanstalkConfigurationTemplate
+      Tier: 
+        Name: WebServer
+        Type: Standard
+      VersionLabel: !Ref ElasticBeanstalkApplicationVersion
+
+Outputs:
+  DatalakeNotificationTopicArn:
+    Description: The SNS Topic ARN used for CloudWatch Alarm Notifications
+    Value: !Ref DatalakeNotificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-DatalakeNotificationTopicArn'  
+  ElasticBeanstalkEC2RoleArn:
+    Description: IAM Role ARN for the Elastic Beanstalk ASG EC2 instances.
+    Value: !GetAtt ElasticBeanstalkEC2Role.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ElasticBeanstalkEC2RoleArn'
+  ElasticBeanstalkServiceRoleArn:
+    Description: IAM Role ARN for the Elastic Beanstalk Application.
+    Value: !GetAtt ElasticBeanstalkServiceRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ElasticBeanstalkServiceRoleArn'
+  ElasticBeanstalkEnvironmentName:
+    Description: Name of the elastic beanstalk environment for web server app.
+    Value: !Ref ElasticBeanstalkEnvironment
+    Export:
+      Name: !Sub '${AWS::StackName}-EB-EnvironmentName'
+  ElasticBeanstalkLoadBalancerURL:
+    Description: URL of the load balancer for web server app.
+    Value: !GetAtt ElasticBeanstalkEnvironment.EndpointURL
+    Export:
+      Name: !Sub '${AWS::StackName}-EB-LoadBalancerURL'
+  ElasticBeanstalkEnvironmentHealthAlarmArn:
+    Description: Arn of Cloudwatch Alarm for the elastic beanstalk environment health metric.
+    Value: !GetAtt ElasticBeanstalkEnvironmentHealthAlarm.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-EB-EnvironmentHealthAlarmArn'
+  ElasticBeanstalkApplicationRequests5xxAlarmArn:
+    Description: Arn of Cloudwatch Alarm for the elastic beanstalk Application Requests 5xx metric (Environment type).
+    Value: !GetAtt ElasticBeanstalkApplicationRequests5xxAlarm.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-EB-ApplicationRequests5xxAlarmArn'

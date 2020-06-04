@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Creates the Route53 Hosted Zone and DNS record for the Elastic Beanstalk Multi Container PHP-FPM + Nginx Web App."
+
+Parameters:
+  Route53HostedZoneName:
+    Type: String
+    Description: Name of the Route 53 Hosted Zone for Elastic Beanstalk Applications.
+    Default: elasticbeanstalk.application.com
+    ConstraintDescription: Must be a valid Route53 Hosted Zone name.
+  Route53RecordSetName:
+    Type: String
+    Description: Name of the Route53 record set. It together with the HostedZoneName forms the DNS record.
+    Default: nginx-web-server
+    ConstraintDescription: Must be a valid Route53 Record Set name.
+  ElasticBeanstalkStackName:
+    Type: String
+    Description: Name of the elastic beanstalk web application CF stack.
+    Default: Development-EB-docker-web-app
+    ConstraintDescription: Must be an existing CF stack name.
+
+Mappings:
+  ELBRoute53HostedZoneId:
+    us-west-1:
+      HostedZoneId: Z368ELLRRE2KJ0
+
+Resources:
+  ElasticBeanstalkRoute53HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Join ['', [!Ref 'Route53HostedZoneName', .]]
+
+  ElasticBeanstalkRoute53DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref ElasticBeanstalkRoute53HostedZone
+      Name: !Join ['', [!Ref 'Route53RecordSetName', ., !Ref 'Route53HostedZoneName', .]]
+      AliasTarget:
+        DNSName:
+          "Fn::Join":
+            - ''
+            - - 'dualstack.'
+              - Fn::ImportValue: !Sub "${ElasticBeanstalkStackName}-EB-LoadBalancerURL"
+        EvaluateTargetHealth: false
+        HostedZoneId:
+          Fn::FindInMap:
+            - ELBRoute53HostedZoneId
+            - Ref: AWS::Region
+            - HostedZoneId
+      Type: A
+
+Outputs:
+  Route53HostedZoneID:
+    Description: The Elastic Beanstalk Applications Route 53 Hosted Zone ID.
+    Value: !Ref Route53HostedZoneName
+    Export:
+      Name: !Sub '${AWS::StackName}-Route53HostedZoneID'
+  ElasticBeanstalkRoute53DNSRecordName:
+    Description: The domain name of the record set for the Elastic Beanstalk web application.
+    Value: !Ref ElasticBeanstalkRoute53DNSRecord
+    Export:
+      Name: !Sub '${AWS::StackName}-ElasticBeanstalkRoute53DNSRecord'
+
+

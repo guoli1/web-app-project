@@ -1,0 +1,53 @@
+version: 0.2
+
+env:
+  variables:
+      ENVIRONMENT_NAME: "development"
+      INCREMENT_LEVEL: "patch"
+      PROJECT_NAME: "eb-docker-nginx-proxy"
+      REPO_URL: "https://github.com/guoli1/web-app-project.git"
+  git-credential-helper: yes
+
+phases:
+  install:
+    #If you use the Ubuntu standard image 2.0 or later, you must specify runtime-versions.
+    #If you specify runtime-versions and use an image other than Ubuntu standard image 2.0, the build fails.
+    runtime-versions:
+       nodejs: 10
+  pre_build:
+    commands:
+       - npm install -g semver@5.4.1
+  build:
+    commands:
+       - echo Build started on `date`
+       - set -e
+       - set +x
+       - ls -la
+       - sh deployment_scripts/codebuild_git_wrapper.sh $REPO_URL
+       - ls -la
+       - sh deployment_scripts/validate_environment_name.sh -e $ENVIRONMENT_NAME
+       - sh deployment_scripts/validate_semver_increment_level.sh -i $INCREMENT_LEVEL
+       - sh deployment_scripts/get_incremented_build_version.sh -e $ENVIRONMENT_NAME -p $PROJECT_NAME -i $INCREMENT_LEVEL
+  post_build:
+    commands:
+       - NEW_VERSION=$(cat incrementedVersion.txt)
+       - NEW_TAG_NAME=$(cat incrementedTagName.txt)
+       - echo "The incremented version number is $NEW_VERSION"
+       - echo "Trying to tag $NEW_TAG_NAME"
+       - git tag "$NEW_TAG_NAME"
+       - git push --tags
+       - echo "Git tag $NEW_TAG_NAME pushed"
+artifacts:
+  secondary-artifacts:
+    ElasticBeanstalkAppVersionSource:
+      files:
+        - '**/*'
+      name: $NEW_VERSION
+      discard-paths: no
+      base-directory: $PROJECT_NAME
+    CloudFormationSource:
+      files:
+        - elasticbeanstalk.yaml
+        - development-stack-configuration.json
+      discard-paths: no
+      base-directory: cf_templates
