@@ -1,0 +1,275 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Creates EC2 instance with autoscaling group, hosted inside a VPC's subnet. SSH connections are limited to Admin CIDR IP addresses."
+Mappings:
+  ImageMap:
+    'ca-central-1':
+      '64': 'ami-a7aa15c3'
+    'us-east-1':
+      '64': 'ami-a4c7edb2'
+    'us-east-2':
+      '64': 'ami-8a7859ef'
+    'us-west-1':
+      '64': 'ami-327f5352'
+    'us-west-2':
+      '64': 'ami-6df1e514'
+
+Parameters:
+  AdminCidrBlock1:
+    Type: String
+    Description: Optional CIDR block for restricting SSH access to server.
+  AdminCidrBlock2:
+    Type: String
+    Description: Optional CIDR block for restricting access to server.
+  AdminCidrBlock3:
+    Type: String
+    Description: Optional CIDR block for restricting access to server.
+  ASGDesiredCapacity:
+      Type: Number
+      Description: Number of instances to run.
+      Default: 1
+  ASGMaxSize:
+      Type: Number
+      Description: Max number of instances to scale out to.
+      Default: 4
+  ASGMinSize:
+      Type: Number
+      Description: Min number of instances to scale in to.
+      Default: 0
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues: ['t2.micro', 'm4.large', 'm4.xlarge', 'm5.large', 'm5.xlarge']
+    Description: The EC2 instance type
+    ConstraintDescription: Must be a valid instance type.
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Keypair for deploying EC2 instances.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy instances in.
+  VpcInstanceSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnets to distribute instances. These should belong to selected VPC.
+  EbsVolumeSize:
+    Type: String
+    Description: Size of an encrypted volume in GB.
+    ConstraintDescription: Must be a valid number.
+
+Conditions:
+  AddAdminCidrBlock1: !Not [!Equals [!Ref AdminCidrBlock1, '']]
+  AddAdminCidrBlock2: !Not [!Equals [!Ref AdminCidrBlock2, '']]
+  AddAdminCidrBlock3: !Not [!Equals [!Ref AdminCidrBlock3, '']]
+  AddEbsVolumeSize: !Not [!Equals [!Ref EbsVolumeSize, '']]
+
+Resources:
+  EC2InstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for EC2 instances
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ec2-security-group'
+
+  EC2SecurityGroupSSHIngress1:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Condition: AddAdminCidrBlock1
+    Properties:
+      GroupId: !Ref EC2InstanceSecurityGroup
+      IpProtocol: TCP
+      CidrIp: !Ref AdminCidrBlock1
+      FromPort: 22
+      ToPort: 22
+
+  EC2SecurityGroupSSHIngress2:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Condition: AddAdminCidrBlock2
+    Properties:
+      GroupId: !Ref EC2InstanceSecurityGroup
+      IpProtocol: TCP
+      CidrIp: !Ref AdminCidrBlock2
+      FromPort: 22
+      ToPort: 22
+
+  EC2SecurityGroupSSHIngress3:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Condition: AddAdminCidrBlock3
+    Properties:
+      GroupId: !Ref EC2InstanceSecurityGroup
+      IpProtocol: TCP
+      CidrIp: !Ref AdminCidrBlock3
+      FromPort: 22
+      ToPort: 22
+
+  # EC2 IAM role
+  EC2IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Path: '/'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'ec2.amazonaws.com'
+            Action: 'sts:AssumeRole'
+
+  EC2IAMRoleCloudWatchPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      Roles: [!Ref EC2IAMRole]
+      PolicyName: !Sub '${AWS::StackName}-cloudwatch-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action:
+              - 'logs:CreateLogGroup'
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+              - 'logs:DescribeLogStreams'
+            Resource:
+              - 'arn:aws:logs:*:*:*'
+
+  EC2IAMRoleCloudWatchMetricsPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      Roles: [!Ref EC2IAMRole]
+      PolicyName: !Sub '${AWS::StackName}-cloudwatch-metrics-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action:
+              - 'cloudwatch:PutMetricData'
+            Resource:
+              - '*'
+
+  EC2IAMRoleEC2ManagementPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      Roles: [!Ref EC2IAMRole]
+      PolicyName: !Sub '${AWS::StackName}-ec2-management-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action:
+              - 'ec2:DescribeInstances'
+              - 'ec2:DescribeTags'
+              - 'ec2:CreateTags'
+              - 'ec2:DescribeNetworkInterfaces'
+              - 'ec2:AttachNetworkInterface'
+            Resource: '*'
+
+  EC2InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles: [!Ref EC2IAMRole]
+
+
+  EC2LaunchConfiguration:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Properties:
+      ImageId: !FindInMap [ImageMap, !Ref 'AWS::Region', '64']
+      KeyName: !Ref KeyPair
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !GetAtt EC2InstanceProfile.Arn
+      SecurityGroups: [ !Ref EC2InstanceSecurityGroup ]
+      BlockDeviceMappings:
+        - !If
+          - AddEbsVolumeSize
+          -
+            DeviceName: '/dev/xvdb'
+            Ebs:
+              VolumeSize: !Ref EbsVolumeSize
+              Encrypted: true
+          - !Ref 'AWS::NoValue'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+
+          # Send logs of this script to /var/log/user-data.log
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+          echo "BEGIN $(date '+%Y-%m-%d %H:%M:%S')"
+
+          if [[ $(ls /dev/ | grep xvdb) ]]; then
+            mkfs -t ext4 /dev/xvdb
+            mkdir ebs_disk
+            mount /dev/xvdb ebs_disk
+          else
+              continue
+          fi
+
+          # Install packages
+          yum -y update
+          yum -y install git
+
+          # Initialize CloudFormation bits
+          /opt/aws/bin/cfn-init \
+            --verbose \
+            --stack ${AWS::StackName} \
+            --resource EC2LaunchConfiguration \
+            --region ${AWS::Region} \
+            > /tmp/cfn-init.log 2>&1 || error_exit $(</tmp/cfn-init.log)
+
+          # Temp solution to get the region right
+          export AWS_DEFAULT_REGION=${AWS::Region}
+
+          echo "Configure Password Authentication"
+          sed -i \
+            -e 's/PasswordAuthentication no/#PasswordAuthentication no/g' \
+            -e 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' \
+            -e 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/g' \
+            /etc/ssh/sshd_config
+
+          # 1. Allow ec2-user
+          cat << EOF | sudo tee -a /etc/ssh/sshd_config
+          AllowGroups ec2-user
+          EOF
+
+          /etc/init.d/sshd restart
+
+          # Signal completion of resource creation
+          /opt/aws/bin/cfn-signal -e $? \
+            --stack ${AWS::StackName} \
+            --resource EC2AutoscalingGroup \
+            --region ${AWS::Region}
+
+          echo "END $(date '+%Y-%m-%d %H:%M:%S')"
+
+  EC2AutoscalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT5M
+    Properties:
+      DesiredCapacity: !Ref ASGDesiredCapacity
+      MinSize: !Ref ASGMinSize
+      MaxSize: !Ref ASGMaxSize
+      VPCZoneIdentifier: [!Ref VpcInstanceSubnetId]
+      LaunchConfigurationName: !Ref EC2LaunchConfiguration
+      HealthCheckGracePeriod: 300
+      HealthCheckType: EC2
+      MetricsCollection:
+        - Granularity: '1Minute'
+          Metrics:
+            - 'GroupMinSize'
+            - 'GroupMaxSize'
+            - 'GroupDesiredCapacity'
+            - 'GroupInServiceInstances'
+            - 'GroupPendingInstances'
+            - 'GroupStandbyInstances'
+            - 'GroupTerminatingInstances'
+            - 'GroupTotalInstances'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-asg'
+          PropagateAtLaunch: true
+
+Outputs:
+  EC2InstanceSecurityGroupId:
+    Description: The security group ID of the EC2 instances
+    Value: !GetAtt EC2InstanceSecurityGroup.GroupId
