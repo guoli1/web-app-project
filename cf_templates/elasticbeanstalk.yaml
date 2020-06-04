@@ -1,12 +1,13 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: >-
-  Creates the frontend and backend docker containers for datahub buddy web application.
+  Creates the Elastic Beanstalk Environment and Application to host the multi-container PHP-FPM + Nginx web app.
+  Also creates the SNS topic to receive Cloudwatch alarm notifications.
 Parameters:
   Environment:
     Type: String
-    AllowedValues: ['test', 'dev', 'cert', 'prod']
-    Description: The Environment tag. This should be consistent with the stack name prefix.
-    ConstraintDescription: Must be one of test, dev, cert or prod.
+    AllowedValues: ['test', 'dev', 'prod']
+    Description: The Environment tag.
+    ConstraintDescription: Must be one of test, dev or prod.
   DeleteSourceFromS3Enabled:
     Type: String
     AllowedValues: [true, false]
@@ -32,10 +33,10 @@ Parameters:
     Default: t2.micro
     AllowedValues: ["t2.micro", "t2.small", "t2.medium", "t2.large"]
     Description: The web app EC2 instance type
-    ConstraintDescription: Must be a valid instance type
+    ConstraintDescription: Must be a valid instance type.
   VpcId:
     Type: AWS::EC2::VPC::Id
-    Description: VPC to deploy web app EC2 instances
+    Description: VPC to deploy web app EC2 instances.
   VpcInstanceSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Subnet to distribute EC2 instances. Should belong to selected VPC.
@@ -65,9 +66,9 @@ Parameters:
   LogRetentionInDays:
     Type: Number
     AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
-    Description: The number of days to retain the CloudWatch logs
+    Description: The number of days to retain the CloudWatch logs.
     Default: 1
-    ConstraintDescription: Possible values are 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, and 3653
+    ConstraintDescription: Possible values are 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827 and 3653
   LbHealthCheckPath:
     Type: String
     Description: URL for load balancer health check.
@@ -80,14 +81,14 @@ Parameters:
     Default: true
   ASGMinSize:
       Type: Number
-      Description: Min number of instances to scale in to
+      Description: Min number of instances to scale in to.
       Default: 1
   ASGMaxSize:
       Type: Number
-      Description: Max number of instances to scale out to
+      Description: Max number of instances to scale out to.
       Default: 6
   HTTPLocation:
-    Description: The IP address range that can be used to estalish an HTTP session to the Application Load Balancer
+    Description: The IP address range that can be used to estalish an HTTP session to the Elastic Load Balancer.
     Type: String
     MinLength: '9'
     MaxLength: '18'
@@ -141,10 +142,10 @@ Conditions:
   TlsEnabled: !Not [ !Equals [ !Ref SSLCertificateArn, "" ] ]
 Resources:
   # Security Group
-  ALBSecurityGroup:
+  ELBSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      GroupDescription: Security group for application load balancer
+      GroupDescription: Security group for classic load balancer
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: '80'
@@ -160,7 +161,7 @@ Resources:
       DisplayName: !Sub 'Notifications for ${AWS::StackName}'
 
   # IAM Roles, Instance Profiles and Policies
-  DatahubBuddyEC2Role:
+  ElasticBeanstalkEC2Role:
     Type: AWS::IAM::Role
     Properties:
       Path: "/"
@@ -175,16 +176,16 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly            
         - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker     
   
-  DatahubBuddyInstanceProfile:
+  ElasticBeanstalkInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: "/"
-      Roles: [!Ref DatahubBuddyEC2Role]
+      Roles: [!Ref ElasticBeanstalkEC2Role]
 
-  DatahubBuddyEC2RoleCloudWatchPolicy:
+  ElasticBeanstalkEC2RoleCloudWatchPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      Roles: [!Ref DatahubBuddyEC2Role]
+      Roles: [!Ref ElasticBeanstalkEC2Role]
       PolicyName: !Sub "${AWS::StackName}-cloudwatch-policy"
       PolicyDocument:
         Version: 2012-10-17
@@ -199,10 +200,10 @@ Resources:
             Resource:
               - "arn:aws:logs:*:*:*"
 
-  DatahubBuddyEC2RoleCloudwatchMetircs:
+  ElasticBeanstalkEC2RoleCloudwatchMetircs:
     Type: AWS::IAM::Policy
     Properties:
-      Roles: [!Ref DatahubBuddyEC2Role]
+      Roles: [!Ref ElasticBeanstalkEC2Role]
       PolicyName: !Sub "${AWS::StackName}-cloudwatch-metrics-policy"
       PolicyDocument:
         Version: 2012-10-17
@@ -215,8 +216,7 @@ Resources:
             Resource:
               - "*"
 
-  # -----------------------------
-  DatahubBuddyEbstalkServiceRole:
+  ElasticBeanstalkServiceRole:
     Type: AWS::IAM::Role
     Properties:
       Path: "/"
@@ -228,10 +228,10 @@ Resources:
               Service: elasticbeanstalk.amazonaws.com
             Action: sts:AssumeRole
 
-  DatahubBuddyEC2AndServiceRoleElasticbeanstalkS3Policy:
+  ElasticBeanstalkEC2AndServiceRoleS3Policy:
     Type: AWS::IAM::Policy
     Properties:
-      Roles: [!Ref DatahubBuddyEC2Role, !Ref DatahubBuddyEbstalkServiceRole]
+      Roles: [!Ref ElasticBeanstalkEC2Role, !Ref ElasticBeanstalkServiceRole]
       PolicyName: !Sub "${AWS::StackName}-elasticbeanstalk-s3-policy"
       PolicyDocument:
         Version: 2012-10-17
@@ -257,10 +257,10 @@ Resources:
               - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}'
               - !Sub 'arn:aws:s3:::${EBSApplicationVersionSourceBucket}/*'
 
-  DatahubBuddyEbstalkServiceRolePolicy:
+  ElasticBeanstalkServiceRolePolicy:
     Type: AWS::IAM::Policy
     Properties:
-      Roles: [!Ref DatahubBuddyEbstalkServiceRole]
+      Roles: [!Ref ElasticBeanstalkServiceRole]
       PolicyName: !Sub "${AWS::StackName}-ebs-service-policy"
       PolicyDocument:
         Version: '2012-10-17'
@@ -303,8 +303,8 @@ Resources:
             - logs:PutLogEvents
           Resource: arn:aws:logs:*:*:log-group:/aws/elasticbeanstalk/*
   
-  # Cloudwatch Alarms
-  DatahubBuddyEBEnvironmentHealthAlarm:
+  # CloudWatch Alarms
+  ElasticBeanstalkEnvironmentHealthAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: AlarmsEnabled
     Properties:
@@ -320,12 +320,12 @@ Resources:
         ComparisonOperator: GreaterThanOrEqualToThreshold
         Dimensions:
           - Name: EnvironmentName
-            Value: !Ref DatahubBuddyEBSEnvironment
+            Value: !Ref ElasticBeanstalkEnvironment
         TreatMissingData: 'notBreaching'
 
   # Note this captures all EC2 instances. 
-  # Use Cloudwatch metric to figure out which instance triggered this alarm.
-  DatahubBuddyEBApplicationRequests5xxAlarm:
+  # Use CloudWatch metric to figure out which instance triggered this alarm.
+  ElasticBeanstalkApplicationRequests5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: AlarmsEnabled
     Properties:
@@ -341,41 +341,40 @@ Resources:
         ComparisonOperator: GreaterThanThreshold
         Dimensions:
           - Name: EnvironmentName
-            Value: !Ref DatahubBuddyEBSEnvironment
+            Value: !Ref ElasticBeanstalkEnvironment
         TreatMissingData: 'notBreaching'
 
-  # Elasticbeanstalk Resources
-  DatahubBuddyEBSApplication:
+  # Elastic Beanstalk Resources
+  ElasticBeanstalkApplication:
     Type: AWS::ElasticBeanstalk::Application
     Properties: 
       ApplicationName: !Sub '${AWS::StackName}'
       Description: !Sub "${AWS::StackName} Web Application in ${Environment}"
       ResourceLifecycleConfig: 
-        ServiceRole: !GetAtt DatahubBuddyEbstalkServiceRole.Arn
+        ServiceRole: !GetAtt ElasticBeanstalkServiceRole.Arn
         VersionLifecycleConfig: 
           MaxAgeRule: 
             DeleteSourceFromS3: !Ref DeleteSourceFromS3Enabled
             Enabled: true
             MaxAgeInDays: !Ref MaxAgeInDays
 
-  DatahubBuddyEBSApplicationVersion:
+  ElasticBeanstalkApplicationVersion:
     Type: AWS::ElasticBeanstalk::ApplicationVersion
     Properties: 
-      ApplicationName: !Ref DatahubBuddyEBSApplication 
+      ApplicationName: !Ref ElasticBeanstalkApplication
       Description: !Sub "${AWS::StackName} EBS application version for ${Environment}"
       SourceBundle: 
         S3Bucket: !Ref EBSApplicationVersionSourceBucket
         S3Key: !Ref EBSApplicationVersionSourceKey
   
-  DatahubBuddyEBSConfigurationTemplate:
+  ElasticBeanstalkConfigurationTemplate:
     Type: AWS::ElasticBeanstalk::ConfigurationTemplate
     DependsOn: 
-      - ALBSecurityGroup
+      - ELBSecurityGroup
     Properties: 
-      ApplicationName: !Ref DatahubBuddyEBSApplication
+      ApplicationName: !Ref ElasticBeanstalkApplication
       Description: !Sub "${AWS::StackName} EBS configuration template for ${Environment}"
       SolutionStackName: '64bit Amazon Linux 2018.03 v2.20.2 running Multi-container Docker 19.03.6-ce (Generic)'
-      # SolutionStackName: '64bit Amazon Linux 2018.03 v2.18.0 running Multi-container Docker 18.09.9-ce (Generic)'
       OptionSettings:
         - 
           Namespace: aws:autoscaling:asg
@@ -395,7 +394,7 @@ Resources:
         - 
           Namespace: "aws:autoscaling:launchconfiguration"
           OptionName: IamInstanceProfile
-          Value: !GetAtt DatahubBuddyInstanceProfile.Arn
+          Value: !GetAtt ElasticBeanstalkInstanceProfile.Arn
         - 
           Namespace: "aws:autoscaling:launchconfiguration"
           OptionName: SSHSourceRestriction
@@ -517,7 +516,7 @@ Resources:
         - 
           Namespace: "aws:elasticbeanstalk:environment"
           OptionName: ServiceRole
-          Value: !GetAtt DatahubBuddyEbstalkServiceRole.Arn
+          Value: !GetAtt ElasticBeanstalkServiceRole.Arn
         - 
           Namespace: "aws:elasticbeanstalk:healthreporting:system"
           OptionName: SystemType
@@ -552,11 +551,11 @@ Resources:
         -
           Namespace: "aws:elb:loadbalancer"
           OptionName: SecurityGroups
-          Value: !Ref ALBSecurityGroup
+          Value: !Ref ELBSecurityGroup
         -
           Namespace: "aws:elb:loadbalancer"
           OptionName: ManagedSecurityGroup
-          Value: !Ref ALBSecurityGroup
+          Value: !Ref ELBSecurityGroup
         -
          Namespace: !Sub
            - "aws:elb:listener:${ListenPort}"
@@ -586,17 +585,17 @@ Resources:
          OptionName: ConnectionDrainingEnabled
          Value: !Ref ConnectionDrainingEnabled
 
-  DatahubBuddyEBSEnvironment:
+  ElasticBeanstalkEnvironment:
     Type: AWS::ElasticBeanstalk::Environment
     Properties:
-      ApplicationName: !Ref DatahubBuddyEBSApplication
+      ApplicationName: !Ref ElasticBeanstalkApplication
       EnvironmentName: !Sub "${AWS::StackName}-${Environment}"
       Description: !Sub "${AWS::StackName} EBS environment ${Environment}"
-      TemplateName: !Ref DatahubBuddyEBSConfigurationTemplate
+      TemplateName: !Ref ElasticBeanstalkConfigurationTemplate
       Tier: 
         Name: WebServer
         Type: Standard
-      VersionLabel: !Ref DatahubBuddyEBSApplicationVersion
+      VersionLabel: !Ref ElasticBeanstalkApplicationVersion
 
 Outputs:
   DatalakeNotificationTopicArn:
@@ -604,33 +603,33 @@ Outputs:
     Value: !Ref DatalakeNotificationTopic
     Export:
       Name: !Sub '${AWS::StackName}-DatalakeNotificationTopicArn'  
-  DatahubBuddyEC2RoleArn:
+  ElasticBeanstalkEC2RoleArn:
     Description: IAM Role ARN for the Elastic Beanstalk ASG EC2 instances.
-    Value: !GetAtt DatahubBuddyEC2Role.Arn
+    Value: !GetAtt ElasticBeanstalkEC2Role.Arn
     Export:
-      Name: !Sub '${AWS::StackName}-EC2RoleArn'
-  DatahubBuddyEbstalkServiceRoleArn:
+      Name: !Sub '${AWS::StackName}-ElasticBeanstalkEC2RoleArn'
+  ElasticBeanstalkServiceRoleArn:
     Description: IAM Role ARN for the Elastic Beanstalk Application.
-    Value: !GetAtt DatahubBuddyEbstalkServiceRole.Arn
+    Value: !GetAtt ElasticBeanstalkServiceRole.Arn
     Export:
-      Name: !Sub '${AWS::StackName}-EbstalkServiceRoleArn'
-  DatahubBuddyEBEnvironmentName:
+      Name: !Sub '${AWS::StackName}-ElasticBeanstalkServiceRoleArn'
+  ElasticBeanstalkEnvironmentName:
     Description: Name of the elastic beanstalk environment for web server app.
-    Value: !Ref DatahubBuddyEBSEnvironment
+    Value: !Ref ElasticBeanstalkEnvironment
     Export:
-      Name: !Sub '${AWS::StackName}-EBEnvironmentName'
-  DatahubBuddyEBLoadBalancerURL:
+      Name: !Sub '${AWS::StackName}-EB-EnvironmentName'
+  ElasticBeanstalkLoadBalancerURL:
     Description: URL of the load balancer for web server app.
-    Value: !GetAtt DatahubBuddyEBSEnvironment.EndpointURL
+    Value: !GetAtt ElasticBeanstalkEnvironment.EndpointURL
     Export:
-      Name: !Sub '${AWS::StackName}-EBLoadBalancerURL'
-  DatahubBuddyEBEnvironmentHealthAlarmArn:
+      Name: !Sub '${AWS::StackName}-EB-LoadBalancerURL'
+  ElasticBeanstalkEnvironmentHealthAlarmArn:
     Description: Arn of Cloudwatch Alarm for the elastic beanstalk environment health metric.
-    Value: !GetAtt DatahubBuddyEBEnvironmentHealthAlarm.Arn
+    Value: !GetAtt ElasticBeanstalkEnvironmentHealthAlarm.Arn
     Export:
-      Name: !Sub '${AWS::StackName}-EBEnvironmentHealthAlarmArn'
-  DatahubBuddyEBApplicationRequests5xxAlarmArn:
+      Name: !Sub '${AWS::StackName}-EB-EnvironmentHealthAlarmArn'
+  ElasticBeanstalkApplicationRequests5xxAlarmArn:
     Description: Arn of Cloudwatch Alarm for the elastic beanstalk Application Requests 5xx metric (Environment type).
-    Value: !GetAtt DatahubBuddyEBApplicationRequests5xxAlarm.Arn
+    Value: !GetAtt ElasticBeanstalkApplicationRequests5xxAlarm.Arn
     Export:
-      Name: !Sub '${AWS::StackName}-EBApplicationRequests5xxAlarmArn'
+      Name: !Sub '${AWS::StackName}-EB-ApplicationRequests5xxAlarmArn'
