@@ -25,8 +25,8 @@ The application EC2 auto scaling group is configured to use Elastic Load Balanci
 
     * The EC2 auto scaling group is configured to have a minimum size of 2 instances and a maximum size of 6 instances.
         * The group's autoscaling settings are as follows:
-            * When the sum of Elastic Beanstalk application request count is higher than 15 for 1 minute, the ASG will add 1 instance to the group and then wait 2 minutes before allowing another scaling activity.
-            * When the sum of Elastic Beanstalk application request count is lower than 10 for 1 minute, the ASG will remove 1 instance from the group and again wait 2 minutes before the next scaling activity.
+            * When the sum of Elastic Beanstalk application request count is higher than 15 for 1 minute, the ASG will add 1 instance to the group and then wait 5 minutes before allowing another scaling activity.
+            * When the sum of Elastic Beanstalk application request count is lower than 10 for 1 minute, the ASG will remove 1 instance from the group and again wait 5 minutes before the next scaling activity.
 
     In summary, the ELB health check, Elastic Beanstalk application scaling triggers, and resource availability across multiple AZs together make the web application highly available.
 
