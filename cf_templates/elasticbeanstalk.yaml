@@ -386,7 +386,7 @@ Resources:
           Value: !Ref ASGMaxSize
         - Namespace: aws:autoscaling:asg
           OptionName: Cooldown
-          Value: 120
+          Value: 300
         - 
           Namespace: "aws:autoscaling:launchconfiguration"
           OptionName: EC2KeyName
