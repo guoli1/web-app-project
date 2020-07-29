@@ -382,3 +382,9 @@ Outputs:
     Value: !GetAtt CodePipelineEBWebAppCloudFormationAssumedRole.Arn
     Export:
       Name: !Sub "${CodePipelineName}-CodePipelineEBWebAppCloudFormationAssumedRoleArn"
+
+#CodeBuildArtifactBucketName	development-datalake-artifact	-
+#CodeBuildEnvironmentSubnetID1	subnet-056cef2cfc9c94f40	-
+#CodeBuildEnvironmentSubnetID2	subnet-0ab6c3cc8c5dc8a78	-
+#CodeBuildProjectName	Development-EB-Web-App-Artifacts-Build	-
+#CodePipelineName	Development-web-app-CF-pipeline

@@ -273,3 +273,15 @@ Outputs:
   EC2InstanceSecurityGroupId:
     Description: The security group ID of the EC2 instances
     Value: !GetAtt EC2InstanceSecurityGroup.GroupId
+
+#ASGDesiredCapacity	0	-
+#ASGMaxSize	4	-
+#ASGMinSize	0	-
+#AdminCidrBlock1	45.41.170.124/32	-
+#AdminCidrBlock2	-	-
+#AdminCidrBlock3	-	-
+#EbsVolumeSize	-	-
+#InstanceType	t2.micro	-
+#KeyPair	development-datalake-us-west-1-kp	-
+#VpcId	vpc-04c09dba8401a4ca6	-
+#VpcInstanceSubnetId	subnet-0f6fcfcfc3460d638	-
